@@ -8,6 +8,11 @@ game update** — offsets move.
 Reference: `../Requiem-modification/native/plugin.cpp`,
 `../Requiem-modification/docs/NATIVE_REWRITE_PLAN.md`.
 
+> What MRO takes from a reference mod is only the **published site address** (an
+> Address Library ID + offset — a fact about the game binary), which it
+> re-verifies against live memory. The thunk logic installed at each site is
+> MRO's own code.
+
 ---
 
 ## Rules that govern all of them

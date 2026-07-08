@@ -28,10 +28,15 @@ tools/dump_record.py <EDID> [--type PERK] [--plugin path.esp]
 
 `dump_record.py` walks any plugin (handles zlib-compressed records), finds a
 record by EditorID, and prints every subrecord with sizes and hex. **Before
-creating any new record type, dump a vanilla record that already does what you
-want and copy its subrecord list, order, and byte layout exactly.** The engine
-silently drops records whose layout it doesn't like — there is no error. The
-universal debugging method is: dump yours and the vanilla twin, diff every
+creating any new record type, dump a *vanilla* (base-game) record that already
+does what you want and mirror its subrecord list, order, and byte layout
+exactly — that structure IS the format the engine requires.** You are
+replicating the engine's expected format from Bethesda's own base-game data
+(the authoritative spec) and then filling in your own values; where a specific
+vanilla byte is reproduced it is because that byte is format-critical (an
+archetype, a flag), i.e. a fact about the format, not borrowed authorship. The
+engine silently drops records whose layout it doesn't like — there is no error.
+The universal debugging method is: dump yours and the vanilla twin, diff every
 subrecord (type, order, size, bytes).
 
 ## Traps that cost real time (all silent failures)

@@ -54,7 +54,9 @@ tools/verify_hook_site_live.py 34526 0x20B E8      # -> MATCH => ship it
 
 - Start from a **maintained reference mod** that hooks the same pipeline
   (Valhalla Combat for combat damage, po3's extender for magic apply) and reuse
-  its documented ID+offset. Don't invent sites.
+  its *published* address — the Address Library ID + offset — as your candidate
+  site. That address is a fact about the game binary, not the mod's code: you
+  still verify it live (below) and write your own thunk. Don't invent sites.
 - To hunt a relocated site, dump live memory around the AL address and
   disassemble with **capstone** (`pip install --user --break-system-packages
   capstone`).
