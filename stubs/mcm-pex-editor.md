@@ -1,9 +1,40 @@
-# STUB — SkyUI MCM Editor, direct .pex patching (GUI)
+# SkyUI MCM Editor, direct .pex patching (GUI)
 
-Status: **not started** — design stub. Goal: edit a SkyUI MCM (title, pages, row
-labels, slider ranges, info text) on Linux via a GUI that **patches the compiled
-`.pex` directly**, skipping the psc→wine-compile round-trip for simple text/layout
+Status: **first iteration shipped** — https://github.com/marthofdoom/MCM-Editor
+(local: `../MCM-Editor/`). Goal: edit a SkyUI MCM (title, pages, row labels,
+slider ranges, info text) on Linux via a GUI that **patches the compiled `.pex`
+directly**, skipping the psc→wine-compile round-trip for simple text/layout
 tweaks.
+
+## First-iteration notes (from ground zero to pushed repo)
+
+Built in a single focused session of roughly half an hour: empty folder →
+byte-exact `.pex` parser/writer → SkyUI semantic layer → PySide6 GUI + headless
+CLI → tests → public repo. **This doc set is what made that pace possible.**
+Concretely, the repo saved the trial-and-error that would otherwise dominate:
+
+- The one load-bearing insight — *every string reference is a `u16` index into
+  a plaintext table, never an offset* — was stated up front, so the whole safe
+  editing model (edit the table, leave the bytecode tail byte-identical) was
+  obvious from minute one instead of discovered by corrupting files.
+- Doctrine #1/#3 ("dump a working record; verify against ground truth, not the
+  manual") pointed straight at the winning test: round-trip `parse→emit ==
+  identical` over the **51,564** real `.pex` in the local modlists. That is the
+  parser's correctness proof — it passed 51,564/51,564 — and it caught format
+  mistakes far faster than reading a spec would have.
+- The pillar-2 doc's SkyUI caching gotcha (`setstage SKI_ConfigManagerInstance
+  1`, cold-load, per-save `ModName`/`Pages`) was lifted verbatim into the
+  tool's apply-help text — no in-game rediscovery needed.
+- The ASCII-only rule carried over directly as an input guard.
+
+What still had to be *derived* (docs got us to the doorstep, not through it):
+the exact debug-info / instruction operand layout and the opcode arg-count
+table were modelled on Orvid/Champollion's reader, then proven by the
+round-trip. And a real-world finding the docs didn't call out: ~90% of MCMs in
+a load order (222/247 here) are legacy script-driven and editable this way; the
+other ~10% are MCM Helper (JSON-driven) with no display text in the pex — the
+tool detects and reports those. **Next iteration: page-name detection +
+editing the JSON directly so one interface covers every MCM style.**
 
 ## Why "edit pex directly"
 The `.pex` format keeps a **plaintext string table** — you can see every label,
