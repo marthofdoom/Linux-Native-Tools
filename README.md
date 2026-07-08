@@ -35,12 +35,20 @@ docs explain the *why* and the traps.
 
 ## Core doctrine (applies everywhere)
 
-1. **Never trust format docs — diff a working record.** The engine rejects
+1. **Never trust format docs — dump a working record.** The engine rejects
    malformed records *silently*. Dump a vanilla record that already does what
-   you want, copy its subrecord list / order / byte layout exactly.
-2. **Adapt working sources, don't write from memory.** Build systems, hook
-   thunks, and record layouts are copied from known-good templates and mods,
-   then verified — not reconstructed from documentation.
+   you want and match the structure it reveals: which subrecords appear, in what
+   order, and the byte layout the engine expects. This is reverse-engineering
+   the *format the engine requires* from a live example — a factual spec, not
+   the manual's (often wrong) description of it.
+2. **Model technique on verified references, not memory or docs.** Build
+   scaffolds, hook thunks, and record structures are worked out by studying
+   known-good, openly-documented sources — the SKSE source for an engine call
+   sequence, a maintained mod's *published* hook-site address, the
+   CommonLibSSE-NG plugin template — then implemented and proven here. What you
+   carry over is the verified *fact* (which hook site, which engine function,
+   which byte layout the engine accepts), re-derived and checked against ground
+   truth. The code is your own; you are not lifting anyone's mod.
 3. **Verify against ground truth, not the manual.** Hook sites are checked
    against the *running* game's memory; the Address Library DB is validated
    against crash-log addresses; ESPs are audited against the scripts.
