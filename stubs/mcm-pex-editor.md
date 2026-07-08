@@ -32,9 +32,31 @@ the exact debug-info / instruction operand layout and the opcode arg-count
 table were modelled on Orvid/Champollion's reader, then proven by the
 round-trip. And a real-world finding the docs didn't call out: ~90% of MCMs in
 a load order (222/247 here) are legacy script-driven and editable this way; the
-other ~10% are MCM Helper (JSON-driven) with no display text in the pex — the
-tool detects and reports those. **Next iteration: page-name detection +
-editing the JSON directly so one interface covers every MCM style.**
+other ~10% are MCM Helper (JSON-driven) with no display text in the pex.
+
+## Second iteration — one interface, every MCM style (shipped)
+
+Grew the tool from a pex editor into an all-styles MCM text editor, again in a
+single session. A `McmDocument` layer sniffs the file and hides where the text
+lives:
+
+- **Legacy pex** — patches the string table (iteration 1).
+- **MCM Helper** — edits `config.json` (displayName, pageDisplayName, item
+  text/help, enum options).
+- **Translation-driven** — edits `Interface/Translations/<name>_english.txt`.
+
+The load-order survey drove the design: **~80% of Skyrim MCM configs use
+`$translation_key` tokens** (63/125 all-tokens, 38/125 mixed) whose real words
+live in a translation `.txt`, so editing the pex/JSON alone would edit
+invisible keys. Pex and JSON documents now auto-locate the mod's English
+translation, resolve every token to its display text, and route edits back to
+the translation file (the pex/JSON keeps the token). Page (tab) names — which
+aren't handed to a display call — are found via `cmp_eq` in `OnPageReset`.
+
+The doctrine that paid off again: **decide from a corpus scan, not intuition.**
+The translation-token prevalence, the legacy-vs-MCM-Helper split, and the
+page-name `cmp_eq` signal were all read off the 50k-file local corpus rather
+than guessed, and the pex round-trip stayed 51,564/51,564 through the changes.
 
 ## Why "edit pex directly"
 The `.pex` format keeps a **plaintext string table** — you can see every label,
