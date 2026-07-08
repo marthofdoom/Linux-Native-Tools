@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# aider
+.aider*
+
+# editor / OS
+*.swp
+.DS_Store
