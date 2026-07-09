@@ -185,9 +185,19 @@ world-ref drop/pickup and equip/unequip preserve it, `player -> chest ->
 player` rewrites it. Any (baseFormID, uniqueID)-keyed instance store breaks
 the moment the item passes through another container — MEO v0.11.0's
 ContainerMenu "Gem Pouch" lost banked-XP records this way (log-proven:
-deposited instances arrived as uid=0x1) and was scrapped same-day. If
-instances must transit containers, re-key via TESContainerChangedEvent
-(carries a uniqueID field) — unproven, verify which side's uid it reports.
+deposited instances arrived as uid=0x1) and was scrapped same-day.
+
+**SOLVED (MEO v0.27.0-m19, proven in-game 2026-07-09): re-key via a
+`TESContainerChangedEvent` sink.** The event's `uniqueID` field names the
+**ARRIVING (new-container) uid** (field-proven: `[rekey] uid 36933 -> 42
+(evUid=42)`). Recipe: gate cheaply (does the moved base have records at
+all?), defer to a task, then in the new container find the arriving orphan
+xList (has `ExtraEnchantment`, no record) and the stranded record (uid
+present in neither old nor new container), and move the record to the new
+uid; prefer the event uid when it matches either side, and on ambiguity
+(multiple simultaneous identical instances) log + skip — worst case is one
+orphaned instance, never corruption. With this, uid-keyed instance stores
+survive corpse looting, vendor purchases, and player storage.
 
 ## 9. Instance enchantments DIE on game load — only a real re-equip revives them (MEO m14–m17b, settled 2026-07-09)
 
