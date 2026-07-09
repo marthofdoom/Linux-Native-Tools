@@ -256,3 +256,28 @@ Apply the same to `RemoveItem(kDropping)`-minted refs before re-pickup.
   must be gated or it kills the menu you just opened. Enchanting-bench
   detection: `player->GetOccupiedFurniture()` → base `TESFurniture` →
   `workBenchData.benchType == BenchType::kEnchanting` (3).
+
+## 12. Mutagen on Linux: patching a full MO2 load order without the VFS (MEO m20)
+
+.NET 9 + `Mutagen.Bethesda.Skyrim` runs natively on Linux and reads a
+3,418-plugin MO2 order in ~1.5 s (lazy binary overlays; `ulimit -n 8192` —
+every overlay keeps its file open). No game install, no VFS:
+
+- **MO2 resolution by hand**: `profiles/<p>/plugins.txt` `*`-lines = enabled
+  plugins in load order; `modlist.txt` is highest-priority-FIRST `+`-lines;
+  first hit across `mods/<name>/` wins, `Stock Game/Data` is the final
+  fallback; base masters (Skyrim.esm..Dragonborn.esm) aren't in plugins.txt.
+- **Winning overrides**: build `ModListing<ISkyrimModGetter>` per plugin →
+  `LoadOrder` → `.PriorityOrder.<Group>().WinningOverrides()` +
+  `ToImmutableLinkCache()` resolves cross-master links (0.2 s for a perk
+  tree walk).
+- **Offline verification trick**: substitute a regenerated plugin at its
+  load-order slot and append the not-yet-installed patch, then re-dump the
+  winning override — proves the patch wins without touching the game dirs.
+- **Writing**: `GetOrAddAsOverride(getter)` deep-copies into a new
+  `SkyrimMod`; `WriteToBinary(path)` computes masters from actual links.
+  `IsSmallMaster = true` sets the ESL header flag (0x200) — fine for
+  pure-override patches, costs no load-order slot.
+- **Perk tree / ranked perk / CTDA formats**: see MEO ENGINE_NOTES §11
+  (AVIF nodes: FNAM root=300 nodes=1; NNAM rank chains; GetBaseActorValue
+  CTDA = func 277, AV index in param1, op byte 0x60 for >=).
