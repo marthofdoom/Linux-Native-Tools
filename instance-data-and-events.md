@@ -222,8 +222,11 @@ all round-trip perfectly. Yet the worn item's enchant is inert after load
   `BGSDefaultObjectManager::GetObject<RE::BGSEquipSlot>(kLeft/kRightHandEquip)`;
   worn armor is slotless).
 - **Timing**: `kPostLoadGame` is too early — the engine is still finalizing
-  its own load-equip and the cycle conflicts/gets undone. Defer ~4s (detached
-  timer → `SKSE::GetTaskInterface()->AddTask`); one pass = one visible blink.
+  its own load-equip and the cycle conflicts/gets undone. A blind delay is
+  ALSO unreliable: on heavy-area loads a +4s timer fired during the loading
+  screen and was swallowed (field-hit). Anchor to the **Loading Menu
+  closing** (`MenuOpenCloseEvent`, gameplay resumed) + ~1.5s fade margin,
+  with a long fallback timer; one pass = one visible blink.
 - Build trap: `d3d11.h` → `wingdi.h` `#define`s `GetObject` → `GetObjectW`,
   hijacking `BGSDefaultObjectManager::GetObject<T>()`. `#undef GetObject`
   after the D3D includes.
