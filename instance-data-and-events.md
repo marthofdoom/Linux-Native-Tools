@@ -3,7 +3,7 @@
 Everything below was **validated in-game** during MEO's M2–M4 arc (v0.5.0 →
 v0.7.2) on a heavy load order (Lorerim). Reference implementation:
 `../marth-enchanting-overhaul/native/plugin.cpp`. Canonical copy: `../marth-enchanting-overhaul/Docs/ENGINE_NOTES.md`
-(this file is the one-time 2026-07-07 sync; MEO's repo stays authoritative).
+(synced from MEO 2026-07-09 — §3 updated, §9–§11 added; MEO's repo stays authoritative).
 
 **Standing doctrine (Marth):** replicate engine features by CALLING the
 engine's own flow, the way SKSE's Papyrus natives do — never hand-write the
@@ -64,15 +64,27 @@ the item card but applies **no effect**. The working flow (from SKSE64
    BSTArray<RE::Effect>&)` (SKSE name:
    `PersistentFormManager::CreateOffensiveEnchantment`). Created forms get
    FF-prefix runtime FormIDs and are engine-persisted in the save.
-2. Attach: `xList->Add(new RE::ExtraEnchantment(ench, charge, false))`.
+2. **Make it free** (MEO v0.20.0 find) — `AddWeaponEnchantment` auto-computes
+   a per-hit CHARGE COST from magnitude, and `ExtraEnchantment.charge` is a
+   `uint16` (max `0xFFFF`): a scaled-up magnitude starves the charge and the
+   enchant **shows its description but never fires** — and its elemental glow
+   only reconciles on equip (the classic "FX lag until sheathe/redraw" is
+   this, not an FX-mod bug). If the enchant should not drain, force cost 0:
+   `ench->data.costOverride = 0;`
+   `ench->data.flags.set(RE::EnchantmentItem::EnchantmentFlag::kCostOverride);`
+   then attach with `xList->Add(new RE::ExtraEnchantment(ench, 0xFFFF, false))`.
+   A free, fully-charged enchant applies damage AND visuals immediately on
+   stamp, no re-equip. Armor: `AddArmorEnchantment` + constant/self MGEFs.
 3. If the item is currently equipped:
-   `actor->UpdateWeaponAbility(baseForm, xList, leftHand)`
+   `actor->UpdateWeaponAbility(baseForm, xList, leftHand)` (armor:
+   `UpdateArmorAbility(baseForm, xList)`, no hand arg)
    (`RELOCATION_ID(37803, 38752)`) — activates the magic caster. Skipping
-   it = description with no effect.
+   it = description with no effect. **This only works in a live session — it
+   cannot revive delivery after a game load; see §9.**
 
 `RE::Effect` fields: `effectItem{magnitude, area, duration}`, `baseEffect`
-(the `EffectSetting*`), `cost`. Real weapon enchants bring the engine charge
-bar with them (charge/maxCharge + recharge UX); it is not repurposable.
+(the `EffectSetting*`), `cost` (the effect's own — the enchant recomputes its
+per-hit cost from magnitude, hence step 2).
 
 ## 4. Event sinks — hook-free triggers (all validated)
 
@@ -176,3 +188,56 @@ ContainerMenu "Gem Pouch" lost banked-XP records this way (log-proven:
 deposited instances arrived as uid=0x1) and was scrapped same-day. If
 instances must transit containers, re-key via TESContainerChangedEvent
 (carries a uniqueID field) — unproven, verify which side's uid it reports.
+
+## 9. Instance enchantments DIE on game load — only a real re-equip revives them (MEO m14–m17b, settled 2026-07-09)
+
+Instance `ExtraEnchantment` delivery does NOT survive a save/load. **Every
+piece of persisted data survives intact** — instrumented across three builds:
+the FF created enchant, its `kCostOverride`/`costOverride`, the
+`ExtraEnchantment.charge`, and even the actor's `kLeft/RightItemCharge` AVs
+all round-trip perfectly. Yet the worn item's enchant is inert after load
+(shows on the card, never fires) until re-equipped.
+
+- **The engine's post-load equip reconstruction registers enchant delivery
+  from the item's BASE form (`formEnchanting`) only** — it never reads the
+  instance `ExtraEnchantment`. Items enchanted the vanilla-table way work
+  because the table mints an enchanted base form; instance-enchanted items
+  don't have one.
+- `Actor::UpdateWeaponAbility`/`UpdateArmorAbility` **cannot** fix it
+  post-load (verified: called 4× over 8s, still dead). They work fine
+  in-session on an item that went through a live equip.
+- The ONLY revival is the engine's own equip flow:
+  `RE::ActorEquipManager::UnequipObject(...)` → `EquipObject(...)` on the
+  same instance (weapons need their hand slot from
+  `BGSDefaultObjectManager::GetObject<RE::BGSEquipSlot>(kLeft/kRightHandEquip)`;
+  worn armor is slotless).
+- **Timing**: `kPostLoadGame` is too early — the engine is still finalizing
+  its own load-equip and the cycle conflicts/gets undone. Defer ~4s (detached
+  timer → `SKSE::GetTaskInterface()->AddTask`); one pass = one visible blink.
+- Build trap: `d3d11.h` → `wingdi.h` `#define`s `GetObject` → `GetObjectW`,
+  hijacking `BGSDefaultObjectManager::GetObject<T>()`. `#undef GetObject`
+  after the D3D includes.
+
+## 10. World-ref ownership: spawn-and-pickup is THEFT in owned locations (MEO m17b)
+
+A `PlaceObjectAtMe` reference has NO owner, so ownership falls back to the
+cell/location owner. `Actor::PickUpObject` on it near witnesses = **witnessed
+theft, instant bounty** (found in-game: a bounty per gem swap in town — the
+spawn→stamp→pickup instance-minting recipe from §1 was the criminal). Any
+spawn→pickup flow must first:
+`ref->extraList.SetOwner(player->GetActorBase());`
+Apply the same to `RemoveItem(kDropping)`-minted refs before re-pickup.
+
+## 11. Biped slots + menu dismissal (MEO m12/m18)
+
+- **`BGSBipedObjectForm::HasPartOf(mask)` is `.all()`** — every bit in the
+  mask must match, so a combined multi-slot mask demands one piece fill ALL
+  slots (always false). Test each slot and OR the results.
+- **Dismissing an engine menu**: queue it through the engine —
+  `RE::UIMessageQueue::GetSingleton()->AddMessage(MenuName,
+  UI_MESSAGE_TYPE::kHide, nullptr)`. Used to replace the enchanting-station
+  `CraftingMenu` with a custom menu at bench-open. CAVEAT: the hide fires the
+  menu's normal CLOSE event — any "that menu closed → close mine" coupling
+  must be gated or it kills the menu you just opened. Enchanting-bench
+  detection: `player->GetOccupiedFurniture()` → base `TESFurniture` →
+  `workBenchData.benchType == BenchType::kEnchanting` (3).
