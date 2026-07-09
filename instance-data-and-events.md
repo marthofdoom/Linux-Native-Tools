@@ -216,11 +216,13 @@ all round-trip perfectly. Yet the worn item's enchant is inert after load
 - `Actor::UpdateWeaponAbility`/`UpdateArmorAbility` **cannot** fix it
   post-load (verified: called 4× over 8s, still dead). They work fine
   in-session on an item that went through a live equip.
-- The ONLY revival is the engine's own equip flow:
-  `RE::ActorEquipManager::UnequipObject(...)` → `EquipObject(...)` on the
-  same instance (weapons need their hand slot from
-  `BGSDefaultObjectManager::GetObject<RE::BGSEquipSlot>(kLeft/kRightHandEquip)`;
-  worn armor is slotless).
+- REFINED (MEO m19f): the real rule — **the ability refresh only takes when
+  the enchant extra CHANGES**. A same-form rebuild no-ops against the save's
+  stale ability bookkeeping; re-equip works only because unequip is a forced
+  teardown. The blinkless revival (no equip cycle, invisible): strip
+  `ExtraEnchantment` + `Update*Ability` (teardown), then NEXT task rebuild +
+  `Update*Ability` (fresh ability) — the same flow an in-session socket
+  change uses, which is why socketing never needed a re-equip.
 - **Timing**: `kPostLoadGame` is too early — the engine is still finalizing
   its own load-equip and the cycle conflicts/gets undone. A blind delay is
   ALSO unreliable: on heavy-area loads a +4s timer fired during the loading
