@@ -281,3 +281,18 @@ every overlay keeps its file open). No game install, no VFS:
 - **Perk tree / ranked perk / CTDA formats**: see MEO ENGINE_NOTES §11
   (AVIF nodes: FNAM root=300 nodes=1; NNAM rank chains; GetBaseActorValue
   CTDA = func 277, AV index in param1, op byte 0x60 for >=).
+
+## 13. MGEF-level conditions travel with the effect (Skyrim, 2026-07-09)
+
+An MGEF record's own condition list is evaluated wherever the effect is
+used — including runtime-created enchantments from
+`BGSCreatedObjectManager::AddWeaponEnchantment`. Copying an effect into a
+generated enchant copies its gating for free (Requiem's
+dwemer-bonus/vs-undead companions self-gate as riders). Per-effect-entry
+conditions (CTDA on the ENCH effect item) do NOT travel — generated effect
+items are bare unless you write conditions yourself. Also: Requiem
+reimplements vanilla effects as Script-archetype MGEFs at the vanilla
+FormKey (0x0B72A0 slow); Script archetypes function normally when
+referenced by generated enchants — never treat archetype as a
+replicability test. Staff-ness lives in ENCH.EnchantType ==
+StaffEnchantment + Concentration/Aimed cast shape.
