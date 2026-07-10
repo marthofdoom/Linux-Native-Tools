@@ -296,3 +296,20 @@ FormKey (0x0B72A0 slow); Script archetypes function normally when
 referenced by generated enchants — never treat archetype as a
 replicability test. Staff-ness lives in ENCH.EnchantType ==
 StaffEnchantment + Concentration/Aimed cast shape.
+
+## 14. CommonLibSSE-NG: `TESDataHandler::LookupForm<T>` rejects abstract intermediates (MEO m23b, 2026-07-09)
+
+`TESDataHandler::LookupForm<T>(id, plugin)` and `LookupFormRaw<T>` gate the
+result on `form->Is(T::FORMTYPE)`. Intermediate classes such as
+`RE::TESBoundObject` define no `FORMTYPE` — they inherit `TESForm`'s
+`FormType::None` — so the check fails for every real form and the template
+returns nullptr 100% of the time. It compiles clean and fails silently at
+runtime (MEO shipped a 10,146-row loot-conversion table that resolved
+"0 live"). The trap is asymmetric: `TESForm::LookupByID<T>` routes through
+`form->As<T>()`, which handles intermediates correctly. Rule: pass the
+data-handler templates CONCRETE record classes only; for an intermediate,
+use the non-template `LookupForm(id, plugin)` and cast with
+`->As<RE::TESBoundObject>()`. Corollary for any table-resolution pass: split
+the skip counter by failure reason (item/base/whatever) in the log line —
+a single aggregate count hides a 100%-systematic failure inside what reads
+like ordinary per-row attrition.
