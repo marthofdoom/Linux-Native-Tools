@@ -337,8 +337,11 @@ vendor's leveled-list (LVLI) contents when the player enters trade (as the
 **Recipe:** do the authoritative sweep at `BarterMenu`-open, but defer TWO
 frames (`GetTaskInterface()->AddTask` nested inside `AddTask`) so the list is
 fully built before you touch the chest, then rebuild the open menu via the
-engine's own signal `RE::SendUIMessage::SendInventoryUpdateMessage(ref,
-nullptr)` — the identical inventory-update the engine emits on a buy/sell.
+game's own inventory-update routine — the identical one the engine fires on a
+buy/sell. On CommonLibSSE-NG that helper is `RE::SendUIMessage::
+SendInventoryUpdateMessage(ref, nullptr)`; on OLDER NG (≤3.7.0 it doesn't exist
+yet) bind its relocation directly: `REL::Relocation<void(RE::TESObjectREFR*,
+const RE::TESBoundObject*)>{ RELOCATION_ID(51911, 52849) }`.
 Resolve the sell container as `vendorData.merchantContainer` (fall back to the
 speaker actor's own inventory). Do NOT pre-empt the reset by hand — calling the
 reset early and writing `vendorData.lastDayReset` yourself is hand-writing
