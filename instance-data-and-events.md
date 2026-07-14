@@ -348,3 +348,39 @@ reset early and writing `vendorData.lastDayReset` yourself is hand-writing
 engine bookkeeping and risks desyncing the vendor's gold refresh. Let the
 engine restock, then convert, then ask it to refresh (call the engine's own
 functions, as SKSE does).
+
+## 16. Synthesis/Mutagen load order omits Creation Club; native-Linux drops CC master refs (MEO 2026-07-14)
+
+Porting a Mutagen console patcher to a **Synthesis** patcher (distributed as
+GitHub source Synthesis compiles locally — no binary to ship/scan/flag) surfaced
+two traps that both silently REDUCE conversions:
+
+**(a) Synthesis's `state.LoadOrder` omits Creation Club plugins that aren't in
+`plugins.txt`.** On an Anniversary Edition install that is ALL of them — the ~74
+CC plugins load via `<GameRoot>/Skyrim.ccc`, not `plugins.txt` (verified: deck
+`plugins.txt` listed 0 of 74; `Skyrim.ccc` listed 75). Relying on the patcher's
+`state.LoadOrder` dropped ~24% of conversions and an entire enchantment family
+(`chaos`, a CC effect). FIX: in the patcher, build your OWN calibration load
+order — read `Skyrim.ccc` from the game root, order `base masters -> ccc ->
+plugins.txt`, resolve each name from `state.DataFolderPath` (works for vanilla
+and MO2 alike), then feed THAT to the analysis. The perk-tree edit can still use
+`state.LoadOrder` (CC adds no enchanting perks). The standalone installer already
+did this (`ResolveGame` reads `Skyrim.ccc`); a Synthesis patcher must too.
+
+**(b) Native-Linux (case-sensitive FS) makes Mutagen fail to resolve some CC
+master references → fewer records.** Same binary, same load order: run
+NATIVELY on Linux gave 4139 conversions (chaos=0); run under **Proton/Wine**
+(case-INsensitive) gave 5392 (chaos=49). CC plugins/master refs whose casing
+doesn't exactly match on disk resolve under Wine but not native Linux. This is a
+Mutagen-on-Linux limitation, not app-specific. Consequence for TESTING: a
+native-Linux run under-counts — always validate a load-order patcher via
+Proton/Wine (or on Windows), or you'll chase a phantom regression. Consequence
+for USERS: Synthesis run via Proton (typical Linux Skyrim setup) is
+case-insensitive and correct; only native-Linux Synthesis is affected.
+
+Verification recipe (Steam Deck, real load order w/ 74 CC): run the win-x64 build
+under Proton — `STEAM_COMPAT_DATA_PATH=<compatdata/489830>
+STEAM_COMPAT_CLIENT_INSTALL_PATH=<Steam> "<Proton>/proton" run <exe> ...` with
+paths as `Z:\...`; Proton stdout does NOT pipe, so read the output files, not the
+console. A byte-diff of the patcher's output vs the standalone installer's on the
+same load order is the parity check.
