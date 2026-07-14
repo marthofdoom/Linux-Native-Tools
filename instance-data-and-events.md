@@ -313,3 +313,35 @@ use the non-template `LookupForm(id, plugin)` and cast with
 the skip counter by failure reason (item/base/whatever) in the log line —
 a single aggregate count hides a 100%-systematic failure inside what reads
 like ordinary per-row attrition.
+
+## 15. Vendor stock RESTOCKS from leveled lists at BarterMenu-open, silently (MEO m38, 2026-07-13)
+
+A merchant's barter inventory is not static: the engine re-generates the
+vendor's leveled-list (LVLI) contents when the player enters trade (as the
+`BarterMenu` opens), gated on the vendor's restock day counter vs
+`iDaysToRespawnVendor`. Two traps for anything that rewrites vendor stock:
+
+1. **Ordering.** `DialogueMenu`-open fires BEFORE the restock. A sweep hung on
+   dialogue-open (the safe moment to mutate the chest — mutating it *during*
+   barter-list construction corrupts the list; MEO's m19e Belethor breakage)
+   therefore operates on the PREVIOUS restock cycle's stock. The engine then
+   re-rolls fresh contents a beat later at barter-open, on top of your work.
+   Log-proven (MEO deck 2026-07-13): `[convert] container … 7 item(s)
+   converted` at dialogue time, yet the barter UI still showed re-rolled
+   enchanted names that were absent from the converted-7 list — created by the
+   post-sweep restock.
+2. **No event.** LVLI regeneration emits NO `TESContainerChangedEvent`, so a
+   container-changed sink never sees the new items (same silence noted for
+   in-place vendor generation generally).
+
+**Recipe:** do the authoritative sweep at `BarterMenu`-open, but defer TWO
+frames (`GetTaskInterface()->AddTask` nested inside `AddTask`) so the list is
+fully built before you touch the chest, then rebuild the open menu via the
+engine's own signal `RE::SendUIMessage::SendInventoryUpdateMessage(ref,
+nullptr)` — the identical inventory-update the engine emits on a buy/sell.
+Resolve the sell container as `vendorData.merchantContainer` (fall back to the
+speaker actor's own inventory). Do NOT pre-empt the reset by hand — calling the
+reset early and writing `vendorData.lastDayReset` yourself is hand-writing
+engine bookkeeping and risks desyncing the vendor's gold refresh. Let the
+engine restock, then convert, then ask it to refresh (call the engine's own
+functions, as SKSE does).
