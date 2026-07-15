@@ -384,3 +384,88 @@ STEAM_COMPAT_CLIENT_INSTALL_PATH=<Steam> "<Proton>/proton" run <exe> ...` with
 paths as `Z:\...`; Proton stdout does NOT pipe, so read the output files, not the
 console. A byte-diff of the patcher's output vs the standalone installer's on the
 same load order is the parity check.
+
+## 17. Co-save FormIDs MUST pass ResolveFormID on load — raw rehydration dies on any load-order change (MEO v1.0.6 review, 2026-07-14)
+
+An SKSE co-save stores whatever bytes you write — including the mod-index
+byte of every runtime FormID. Users change load orders constantly (add,
+remove, ESL-flag one plugin); the plugin indices remap, and every raw
+rehydrated id now points into the WRONG plugin's FormID space. Symptoms are
+silent and total: every persisted per-item record reads as dead, banked
+state is unrecoverable, and a stale id can falsely attach to an unrelated
+item. SKSE provides the cure — the co-save embeds the writing session's
+plugin list and `SerializationInterface::ResolveFormID(stored, out)` maps a
+stored id into the current order. Rules, all field-derived from MEO's 1.0.6
+review:
+
+- **Every** stored FormID resolves on load — including dynamic FF-form ids
+  (created refs still pass through the handle map; an unresolvable one means
+  the object is gone → recreate, don't reuse the stale id).
+- Unresolvable → **drop the record and log it** (its plugin left the order);
+  never guess or keep the raw id.
+- **Bound every count and bail on a short read** — a truncated co-save must
+  stop the parse, not fabricate keys from garbage.
+- **Clamp deserialized fields at ingestion** (a corrupt level 0 indexed
+  `thresholds[level-1]` out of bounds two subsystems away).
+- **SKSE does NOT round-trip unread records**: if an older DLL loads a save
+  with newer-versioned records and then SAVES, those records are destroyed.
+  Warn loudly (log + one-shot message box); never log "preserved as unread"
+  — that comforting falsehood steers users into data loss.
+
+## 18. Never mutate a container/BSSimpleList you are iterating — snapshot targets first (MEO v1.0.6 review, 2026-07-14)
+
+The engine's inventory structures (`InventoryChanges::entryList`, an entry's
+`extraLists` — both `BSSimpleList`) are live singly-linked lists. Two ways a
+"read-only" walk turns into mutation under your feet:
+
+1. **Your own downstream call mutates the list.** MEO's kill-XP walk called
+   a grant function that could `AddObjectToContainer` (an item birth) —
+   a head-insert on the walked list makes the iterator revisit the head:
+   double award that frame, chainable into spurious level-ups.
+2. **Equip/unequip dispatch is SYNCHRONOUS into every registered sink.**
+   Cycling an item mid-walk hands control to follower AI and third-party
+   mods (outfit managers are guaranteed in a big order) which mutate the
+   same inventory → node use-after-free.
+
+The pattern: **collect (object, xList, key) tuples into a vector first, then
+act** — and on the act side, RE-FIND live records by key rather than holding
+references (an earlier action may have rewritten the map), and hold actors
+by handle, re-resolved at act time. Same discipline for active-effect walks:
+collect the dispel list fully before calling `ae->Dispel(true)`. Corollary
+from the same review: the player-side path had the comment explaining all
+this and the follower path (written later) violated it anyway — audit every
+NEW call site against existing doctrine, the compiler won't.
+
+## 19. MCM-Helper persists INI values per key name forever — a key that changes SEMANTICS must be RENAMED (MEO v1.0.6, 2026-07-14)
+
+MCM Helper writes the user's settings to `Data/MCM/Settings/<mod>.ini` —
+which lands in MO2's overwrite and SURVIVES mod updates. Consequence: the
+key name is a permanent contract about the value's MEANING, not just its
+spelling. MEO changed `fGemXpSkillXP` from an absolute rate (default 0.01)
+to a ×multiplier (default 1.0) and the review found the old absolute value
+live in the deployed profile's persisted INI — the new DLL would have read
+0.01 as a multiplier and silently cut that XP stream ~100× for every
+upgrading user, with the slider innocently showing the stale number. Fix:
+**rename the key** (`fGemKillXpMult`) so stale persisted values are orphaned
+rather than misread, and keep the DLL parse branch + the MCM config
+generator in lockstep. Related INI hygiene from the same pass: strip the
+UTF-8 BOM MCM Helper writes, and on an unparseable value warn and keep the
+default — `strtof`'s silent 0.0 zeroed features.
+
+## 20. Player-relative filters must be owner-gated when shared code paths serve NPCs (MEO v1.0.6 blocker, 2026-07-14)
+
+Any helper that answers a question by scanning THE PLAYER's state (worn set,
+inventory, active effects) is a landmine inside a code path that other
+callers reach with non-player actors. MEO's 2-of-a-kind stacking cap asked
+"is this instance among the player's top-2 worn copies?" — reached from the
+NPC-gear stamping path, the answer was always no (an NPC's item is never in
+the player's worn set), so the freshly built enchant was STRIPPED from every
+NPC item and its record orphaned in the co-save permanently. The fix is
+mechanical but must be total: **thread the owning actor through every layer
+that gates on it** (stamp → rebuild), gate the filter on
+`owner->IsPlayerRef()`, and treat "nullptr owner" as an explicit legacy
+contract, not a wildcard. General rule: when writing any inventory/effect
+scan helper, name WHOSE state it reads in the function comment, and audit
+every caller for a non-player actor reaching it. (MEO is retiring the gate
+entirely by moving the cap to a runtime active-effect tally — deriving from
+live per-actor state beats owner plumbing.)
