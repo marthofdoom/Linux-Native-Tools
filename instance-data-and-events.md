@@ -243,6 +243,33 @@ spawn→pickup flow must first:
 `ref->extraList.SetOwner(player->GetActorBase());`
 Apply the same to `RemoveItem(kDropping)`-minted refs before re-pickup.
 
+## 10b. `AddObjectToContainer(fromRefr)` does NOT delete the source world ref (MEO m44)
+
+To mint an instance (custom `ExtraDataList`, e.g. a socket enchantment) INTO a
+container, the engine flow is `holder->PlaceObjectAtMe(base,false)` → stamp
+`ref->extraList` → `holder->AddObjectToContainer(base, &xl, 1, fromRefr=ref)`.
+
+**TRAP (field-proven on the deck, corrected a prior wrong note):** the raw native
+`TESObjectREFR::AddObjectToContainer(obj, extraList, count, fromRefr)` copies the
+stamped item into the container's inventory (which owns its extra-data
+independently — it serializes into the `.ess` and survives saves) but it does
+**NOT** delete/consume the `fromRefr` world ref. This is UNLIKE Papyrus
+`ObjectReference.AddItem(akItemToAdd as ObjectReference)`, which does delete the
+source ref — the Papyrus wrapper does that deletion itself; the raw native does
+not. So the `PlaceObjectAtMe` placeholder LINGERS in the world at the holder's
+position: invisible inside a closed chest, but a visible (and lootable, so a real
+DUPLICATE) item when the container sits in the open — e.g. a merchant chest under
+a shop counter. Symptom: "socketed weapons spawning under the counter."
+
+Fix: reap it yourself right after the add —
+`ref->Disable(); ref->SetDelete(true);` — exactly as the `Actor::PickUpObject`
+branch consumes its own placeholder. Deleting the placeholder never touches the
+container entry (independent storage; deleting a world ref can't remove an
+inventory item). `SetDelete(true)` only marks for deferred deletion; the strong
+`NiPointer` from `PlaceObjectAtMe` keeps the call memory-safe even if the engine
+already zeroed the item. Only the container/corpse branch needs this — the
+live-actor `PickUpObject` path already consumes its ref.
+
 ## 11. Biped slots + menu dismissal (MEO m12/m18)
 
 - **`BGSBipedObjectForm::HasPartOf(mask)` is `.all()`** — every bit in the
