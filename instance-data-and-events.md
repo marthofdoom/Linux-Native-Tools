@@ -243,32 +243,60 @@ spawn→pickup flow must first:
 `ref->extraList.SetOwner(player->GetActorBase());`
 Apply the same to `RemoveItem(kDropping)`-minted refs before re-pickup.
 
-## 10b. `AddObjectToContainer(fromRefr)` does NOT delete the source world ref (MEO m44)
+## 10b. `AddObjectToContainer` LINKS (does not copy) the ExtraDataList — the entry OWNS the pointer (MEO m44→m47)
 
 To mint an instance (custom `ExtraDataList`, e.g. a socket enchantment) INTO a
-container, the engine flow is `holder->PlaceObjectAtMe(base,false)` → stamp
-`ref->extraList` → `holder->AddObjectToContainer(base, &xl, 1, fromRefr=ref)`.
+container, the CORRECT engine flow is: build a HEAP `ExtraDataList*` with the
+engine's OWN ctor, stamp it, then
+`holder->AddObjectToContainer(base, xl, 1, nullptr)`. **NO placeholder world ref.**
 
-**TRAP (field-proven on the deck, corrected a prior wrong note):** the raw native
-`TESObjectREFR::AddObjectToContainer(obj, extraList, count, fromRefr)` copies the
-stamped item into the container's inventory (which owns its extra-data
-independently — it serializes into the `.ess` and survives saves) but it does
-**NOT** delete/consume the `fromRefr` world ref. This is UNLIKE Papyrus
-`ObjectReference.AddItem(akItemToAdd as ObjectReference)`, which does delete the
-source ref — the Papyrus wrapper does that deletion itself; the raw native does
-not. So the `PlaceObjectAtMe` placeholder LINGERS in the world at the holder's
-position: invisible inside a closed chest, but a visible (and lootable, so a real
-DUPLICATE) item when the container sits in the open — e.g. a merchant chest under
-a shop counter. Symptom: "socketed weapons spawning under the counter."
+```cpp
+RE::ExtraDataList* MakeEngineXList() {
+    auto* mem = RE::MemoryManager::GetSingleton()->Allocate(0x20, 0, false);
+    if (!mem) return nullptr;
+    using ctor_t = RE::ExtraDataList* (*)(void*);
+    static REL::Relocation<ctor_t> ctor{ RELOCATION_ID(11437, 11583) };  // SE 11437 / AE 11583
+    return ctor(mem);
+}
+```
 
-Fix: reap it yourself right after the add —
-`ref->Disable(); ref->SetDelete(true);` — exactly as the `Actor::PickUpObject`
-branch consumes its own placeholder. Deleting the placeholder never touches the
-container entry (independent storage; deleting a world ref can't remove an
-inventory item). `SetDelete(true)` only marks for deferred deletion; the strong
-`NiPointer` from `PlaceObjectAtMe` keeps the call memory-safe even if the engine
-already zeroed the item. Only the container/corpse branch needs this — the
-live-actor `PickUpObject` path already consumes its ref.
+**CONTRACT — proven at disassembly on 1.6.1170:**
+`TESObjectREFR::AddObjectToContainer` (vtable slot 0x5A) forwards to the
+InventoryChanges worker (addrlib id **16053**), which allocates a fresh entry
++ a 0x10-byte `BSSimpleList` node and at **`+0x484`** does `mov [node], rsi` —
+i.e. it stores **the caller's ExtraDataList pointer** into the entry's
+`extraLists` list. **It LINKS the pointer; there is NO deep-copy of BSExtraData
+anywhere in the engine. The container entry then OWNS that pointer** (frees it
+with the entry). `a_fromRefr` is used for ownership/companion bookkeeping only;
+it is neither consumed nor does it change list handling. AE ctor id **11583** =
+RVA 0x151E90 (sets the vtable — AE 1.6.629+ made BaseExtraList virtual, which is
+why CommonLibSSE-NG **declares but never defines** `ExtraDataList::ExtraDataList()`
+and `new RE::ExtraDataList()` won't link; the reloc ctor is the only way). The
+ctor leaves the presence bitfield null; the engine `Add` worker lazily allocates
+and zeroes it on first use, so `HasType`/`GetByType` on the fresh list are safe.
+
+**⚠ The prior note here (and MEO m44) was WRONG: "copies / entry owns
+independently / reap the placeholder" is FALSE.** m44 did
+`PlaceObjectAtMe` → stamp `&ref->extraList` (an interior pointer at
+TESObjectREFR+0x70) → `AddObjectToContainer(base, &xl, 1, ref)` →
+`ref->Disable(); ref->SetDelete(true)`. Since the engine LINKED
+`&ref->extraList`, deleting the ref freed a list the container entry still
+owned — a use-after-free. Inventory extra-data transfers **by pointer** between
+`InventoryChanges` on every loot/buy/transfer, so the dangling list rode the
+converted item into the player's inventory, was freed at the source cell's
+detach, and detonated on the next inventory walk (a keyword-condition re-eval,
+savegame serialize, or item destroy): a torn `0x2` pointer AV at a
+`SkyrimSE.exe` offset with the mod nowhere on the stack (MEO issue #2, fixed
+m47/v1.0.6c; a tbbmalloc `Block::freeOwnObject` free-path AV is the same plant
+detonating on the entry side). It shipped ~24h on Nexus because the m44 review
+validated the visible SYMPTOM (no under-counter duplicate) without checking the
+copy-vs-link contract.
+
+The live-ACTOR path is different and fine: `Actor::PickUpObject` CONSUMES the
+placeholder ref, so `PlaceObjectAtMe → stamp ref->extraList → PickUpObject`
+correctly moves the ref's own list into inventory with no dangling pointer.
+Never pass a pointer interior to an object you then destroy to any
+ownership-taking inventory API.
 
 ## 11. Biped slots + menu dismissal (MEO m12/m18)
 
