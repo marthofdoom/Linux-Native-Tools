@@ -199,6 +199,24 @@ uid; prefer the event uid when it matches either side, and on ambiguity
 orphaned instance, never corruption. With this, uid-keyed instance stores
 survive corpse looting, vendor purchases, and player storage.
 
+**UPDATE (MEO m49, 2026-07-17): the ambiguity log+skip is a permanent
+RATCHET — disambiguate by effect signature instead.** One stranded record
+poisons EVERY later transfer of that base (its uid is always "present in
+neither container," so any future transfer sees >1 stranded and skips
+forever). Field case: an ancient orphan record + a newly-bought converted
+item of the same base → skip → the new item's per-instance enchant is
+invisible/unmanageable. Fix: resolve the ARRIVING orphan first, then when
+the stranded set is ambiguous, filter it to the record whose own effect
+identity appears in the arriving instance's created enchant (pointer match
+of the effect settings, or a signature compare for ranked kin). Exactly one
+survivor → re-key it; zero or >1 → keep skipping (mis-assignment is worse
+than a strand). It self-heals a poisoned save on the next drop+re-pickup.
+Also: a vendor's barter offerings come from THREE places — the merchant
+`vendorData.merchantContainer` chest, the LVLI re-roll into that chest at
+barter-open (§ vendor-restock), AND the vendor ACTOR's own personal
+inventory (NPC-record leveled lists). A sweep that only touches the chest
+misses the actor's personal stock.
+
 ## 9. Instance enchantments DIE on game load — only a real re-equip revives them (MEO m14–m17b, settled 2026-07-09)
 
 Instance `ExtraEnchantment` delivery does NOT survive a save/load. **Every
