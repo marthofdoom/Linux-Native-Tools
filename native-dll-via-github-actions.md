@@ -65,8 +65,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
-      - name: Cache vcpkg binaries
-        uses: actions/cache@v4
+      # SPLIT restore/save -- see "the cache only saves on success" below.
+      - name: Restore vcpkg cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v4
         with:
           path: ~\AppData\Local\vcpkg\archives
           key: vcpkg-${{ hashFiles('native/vcpkg.json','native/vcpkg-configuration.json') }}
@@ -74,6 +76,12 @@ jobs:
       - name: Configure
         run: cmake --preset release
         env: { VCPKG_ROOT: C:\vcpkg }
+      - name: Save vcpkg cache
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~\AppData\Local\vcpkg\archives
+          key: vcpkg-${{ hashFiles('native/vcpkg.json','native/vcpkg-configuration.json') }}
       - name: Build
         run: cmake --build build/release
       - uses: actions/upload-artifact@v4
@@ -90,8 +98,42 @@ Notes:
   on PATH.
 - The **vcpkg archive cache** turns a ~15-min cold build into ~1.5–2.5 min once
   warm; key it on the manifest hashes.
+- **`actions/cache` only saves in its post-step when the job SUCCEEDS**
+  (verified MFO 2026-07-21: `gh cache list` was empty after three runs, every
+  one of which had paid a ~30 min cold build). Every failed compile therefore
+  throws the vcpkg build away. That is backwards for early development, which
+  is mostly failed builds — **the cache matters MOST when the build is
+  broken.** Split into `cache/restore` + `cache/save`, put the save
+  immediately after `Configure` (the step that actually builds the
+  dependencies) and before the compile that might fail, guarded by
+  `if: always()`. First green build after the split: 2m24s.
+- **Anything hashed into the cache key is a build-time cost.** `vcpkg.json`'s
+  own `version-string` affects nothing at build time but IS in the key, so
+  stamping a release version into it invalidates the cache every release.
+  (`restore-keys: vcpkg-` prefix-matches an older entry and softens this — a
+  key-churn build came back in 3m30s rather than 30 min — but don't design
+  around the fallback.)
+- Add a **`concurrency` group with `cancel-in-progress`**: without it, several
+  ~30 min cold builds run in parallel racing to populate the same cache and
+  none of them wins.
+  ```yaml
+  concurrency:
+    group: native-${{ github.ref }}
+    cancel-in-progress: true
+  ```
 - `paths:` filter means only `native/**` changes trigger a build — doc/script
   commits don't waste CI.
+- **First-build gotcha: your PCH must supply what the GENERATED file needs.**
+  `add_commonlibsse_plugin` generates `__<Project>Plugin.cpp` using `"..."sv`
+  string-view literals and force-includes your PCH into it. Without
+  `using namespace std::literals;` in the PCH the build dies with
+  `error C3688: invalid literal suffix 'sv'` **in a file you never wrote**.
+  MEO's and MAO's PCHs both end with that line; MFO copied the structure,
+  missed the last line, and lost its first build to it (2026-07-21).
+- **Release gating: compare the `native/` TREE, not the commit sha.** A
+  release script that refuses unless the last green run built `HEAD` will
+  block on any docs- or script-only commit and force a pointless rebuild.
+  `git rev-parse HEAD:native` vs the run's native tree is exact.
 
 ## The Linux-side loop
 

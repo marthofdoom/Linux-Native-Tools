@@ -542,3 +542,66 @@ scan helper, name WHOSE state it reads in the function comment, and audit
 every caller for a non-player actor reaching it. (MEO is retiring the gate
 entirely by moving the cap to a runtime active-effect tally — deriving from
 live per-actor state beats owner plumbing.)
+
+---
+
+## 21. Follower / teammate detection, and why `IsPlayerTeammate` is not enough
+*(MFO, 2026-07-21 — first project in this family to drive actor behaviour.)*
+
+**Native enumeration:** walk `RE::ProcessLists::GetSingleton()->highActorHandles`
+and filter. Hold `ActorHandle`, never `Actor*`, and re-resolve at act time —
+followers cross cells, get dismissed, and die mid-tick. Papyrus cross-check is
+`PO3_SKSEFunctions.GetPlayerFollowers()` (no quest alias needed).
+
+**`IsPlayerTeammate()` is NECESSARY but NOT SUFFICIENT**, and the reason is
+subtle enough that it was designed wrong twice:
+
+- **Inigo** — one of the most-installed followers in existence — **sets** the
+  teammate flag while following but **does not clear it on dismissal**. He
+  signals dismissal with `GetActorValue("WaitingForPlayer") == -1`. So the flag
+  alone reports him as an active follower *forever after you dismiss him*.
+- **Vilja** carries a dedicated `DismissedFollowerFaction`; **Tindra** signals
+  dismissal as rank 0 in her own follow faction. Same shape: still teammates,
+  dismissal signalled elsewhere.
+- **Pet frameworks** are the inverse case — `PetFramework_PetFollowingFaction`
+  rank ≥ 1 grants follower status *without* teammate status.
+
+So the working shape (read off Swiftly Order Squad's shipped
+`IsFollower` / `IsDismissedCustomFollower`, which has solved this at scale) is:
+
+```
+cheap disqualifiers  (dead / disabled / deleted / is-player)
+  -> teammate flag as the GATE
+    -> quirk table that REVOKES for followers whose dismissal the flag misses
+      -> (optionally) inclusion quirks that GRANT without the flag
+```
+
+Keep the quirk data resolving against the live load order and treat an absent
+plugin as normal — log it at debug, never as an error.
+
+**VALIDATED in-game** (MFO 0.0.1, 1.6.1170): teammate add/remove/re-add
+detected deterministically across three cycles via a 2 s refresh.
+
+---
+
+## 22. Where an SKSE plugin's log lands is a CHOICE, not an environment fact
+*(MFO, 2026-07-21.)*
+
+Two destinations, and picking the wrong one means nobody finds your log:
+
+1. **Game-root-relative** (`Data/SKSE/Plugins/X.log`) — MO2's USVFS redirects
+   this into the profile's **Overwrite** folder, which is where most plugins
+   in a Wabbajack-style setup land (ActorLimitFix, BugFixesSSE, ScrambledBugs,
+   BarterLimitFix, …). Open the sink with that literal relative path.
+2. **`SKSE::log::log_directory()`** — resolves into the *wine prefix's*
+   `My Games\Skyrim Special Edition\SKSE\`, **a different filesystem**,
+   typically holding only skse64's own logs.
+
+MEO and MAO use (2), which is why their logs are not in Overwrite with
+everything else. MFO uses (1) with (2) as a fallback for running outside MO2.
+
+**Prefix location is worth verifying, not assuming.** On this machine the live
+prefix is **umu** (`~/Games/umu/<appid>/`), not Steam's
+`steamapps/compatdata/<appid>/` — the Steam one exists but has no SKSE
+directory at all, so any path built from it silently finds nothing. MRO's
+playbook cites a stale appid entirely.
