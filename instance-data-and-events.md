@@ -605,3 +605,64 @@ prefix is **umu** (`~/Games/umu/<appid>/`), not Steam's
 `steamapps/compatdata/<appid>/` — the Steam one exists but has no SKSE
 directory at all, so any path built from it silently finds nothing. MRO's
 playbook cites a stale appid entirely.
+
+---
+
+## 23. CommonLibSSE-NG: `BGSDefaultObjectManager::IsObjectInitialized` loads a `bool[]` AS A POINTER and dereferences it (MEO v1.0.7-beta2, 2026-07-21)
+
+`IsObjectInitialized` and the `GetObject<T>()` inline that calls it both
+resolve the manager's `objectInit` array — a plain `bool[]` living at
+`+0xB80` — via `REL::RelocateMember<bool*>(this, 0xB80, 0xBA8)`. That macro
+is meant to compute an ADDRESS (`lea`) but here it emits a member LOAD
+(`mov`, opcode `48 8b`): it reads the bytes AT `+0xB80` as if they were a
+pointer, then dereferences that "pointer". The bug is old — broken in
+upstream commit `61383c79` — and MEO's pin (NG **3.7.0**, REF `c4ab853d`)
+sits squarely inside the broken window; the fix (`054cbcd4`, 2024-07-28)
+landed on NG main but was never cut into a tagged release, so it ships in
+every MEO build to date.
+
+**Why it's silent on AE and fatal on SE.** The two runtimes disagree about
+what lives at `+0xB80`:
+
+- **SE 1.5.97** — `+0xB80` genuinely *is* the `objectInit` bool array. Eight
+  `true` bytes read back as the 64-bit value **`0x0101010101010101`** — a
+  register full of `0x01` bytes is the tell that a bool array just got read
+  as a pointer. Dereferencing that "address" is a guaranteed access
+  violation. 100% reproducible: any worn socketed **weapon** taken through
+  an equip cycle CTDs.
+- **AE 1.6.x** — the same struct offset happens to hold a populated,
+  dereferenceable `TESForm*` left over from adjacent layout differences, so
+  the bad load "succeeds" and AE survives **by accident**, not because the
+  code path is correct there too.
+
+Field-proven by a v1.0.7-beta2 report: 100% reproducible CTD on SE 1.5.97 at
+`MEO.dll+0x4A62A` (the v1.0.6 line's equivalent site is `+0x458EA`), both
+inside the equip-cycle slot lookup that calls the inlined `GetObject<T>()`.
+
+**Fix:** never call `dom->GetObject<T>()` / `IsObjectInitialized()` against
+this pin. Index `dom->objects[idx]` directly — same underlying engine data,
+no broken inline in the path. Any sibling project pinned to NG ≤3.7.0
+(REF `c4ab853d` or earlier) that touches `BGSDefaultObjectManager` carries
+this bug too.
+
+## Minting an `ExtraUniqueID` onto WORN gear (2026-07-28)
+
+Two ways to give an inventory item a fresh `ExtraUniqueID` (per-instance
+identity), and picking the wrong one for worn gear misbehaves:
+
+- **Plain, UNWORN stack (no xList of its own):** use the engine drop/pickup
+  flow — `actor->RemoveItem(form, 1, kDropping, …)` → on the dropped ref
+  `extraList.SetOwner(actor->GetActorBase())` (avoid theft) +
+  `extraList.Add(new RE::ExtraUniqueID(base, uid))` → `actor->PickUpObject(ref)`.
+  Required because NG 3.7 declares but does not export the `ExtraDataList`
+  ctor, so you can't `new` one; the engine must materialize it.
+- **WORN gear:** it ALREADY has an xList (the `kWorn`/`kWornLeft` extra), so
+  mint IN PLACE: `wornXList->Add(new RE::ExtraUniqueID(base, MintUID(base)))`.
+  Do NOT drop/pickup a worn item to mint — `RemoveItem(kDropping)` unequips
+  it, and on a non-player actor (a follower) that invites an AI re-equip race
+  and can leave the item unequipped. Add the uid to the live worn xList and
+  the item stays equipped; then apply the ability normally.
+
+Found while adding follower gem-socketing to MEO (own gear displayed
+read-only, minted only on the deliberate socket action). Cross-ref MEO
+`Docs/ENGINE_NOTES.md` (build traps) + `INVARIANTS.md` 7c.
