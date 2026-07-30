@@ -666,3 +666,27 @@ identity), and picking the wrong one for worn gear misbehaves:
 Found while adding follower gem-socketing to MEO (own gear displayed
 read-only, minted only on the deliberate socket action). Cross-ref MEO
 `Docs/ENGINE_NOTES.md` (build traps) + `INVARIANTS.md` 7c.
+
+## SKSE inter-plugin messaging is bucketed by SENDER (2026-07-29)
+
+Providing a message-exchange API between SKSE plugins:
+
+- `RegisterListener(callback)` is `RegisterListener("SKSE", callback)` — the listener
+  lands ONLY in SKSE's sender-bucket.
+- `Dispatch(type, data, len, receiver)` iterates ONLY the DISPATCHING plugin's own
+  bucket; `receiver` filters WITHIN that bucket — it does NOT route the message into
+  the receiver plugin's bucket. So a consumer's `Dispatch(..., receiver="MyPlugin")`
+  is NEVER delivered to MyPlugin's `RegisterListener(cb)` ("SKSE") listener.
+- To RECEIVE directed inter-plugin requests, register a WILDCARD listener with a
+  null sender: `RegisterListener(OnApiMessage, nullptr)` — a null sender sits in
+  every plugin's bucket (the SKEE/RaceMenu pattern). Gate the handler on your own
+  magic message type; the SKSE lifecycle broadcasts it also receives are then no-ops.
+- The interface itself is a POD request struct (consumer passes a ptr, provider
+  fills a function-pointer interface pointer) OR — the other common idiom — a
+  `GetModuleHandle` + `GetProcAddress("RequestPluginAPI")` DLL export (what
+  TrueHUD/TDM/Precision actually use; those are NOT messaging).
+- Dispatch target name = the CommonLibSSE-NG version-data plugin name (CMake
+  `project(NAME)` → `add_commonlibsse_plugin`), matched case-insensitively.
+
+Found building MEO's `IMEO` inter-plugin API (for MFO). Cross-ref MEO
+`Docs/ENGINE_NOTES.md`.
