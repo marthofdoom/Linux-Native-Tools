@@ -690,3 +690,31 @@ Providing a message-exchange API between SKSE plugins:
 
 Found building MEO's `IMEO` inter-plugin API (for MFO). Cross-ref MEO
 `Docs/ENGINE_NOTES.md`.
+
+## 25. NEVER equip-cycle an actor who is IN or ENTERING furniture (MEO v1.0.8, 2026-08-04)
+
+Seated/lean/crouch furniture entry is a SYNCHRONIZED enter→loop transition
+(`BSSynchronizedClipGenerator`) that requires the actor to hold a stable
+anim-graph state through the sit-down → seated-loop hand-off. An equip/unequip
+event landing in that window forces a graph state change that ABORTS the
+transition: the actor plays the full sit-down idle and is then INSTANTLY
+EJECTED the moment the seated loop should take over. Standing crafting stations
+(forge/enchanter) are idle-only (sit-state `kNormal`) with no seated hand-off,
+so an equip cycle there is harmless — which is the diagnostic tell (forge fine,
+chairs eject).
+
+- **Guard:** skip any un/re-equip when
+  `actor->AsActorState()->GetSitSleepState() != RE::SIT_SLEEP_STATE::kNormal`.
+- **Why it was brutal to diagnose:** a load/refresh pass gated on the player's
+  3D/drawn readiness re-fires the equip cycle on EVERY 3D rebuild — so
+  `resurrect` and `disable`/`enable` never cleared it (they rebuild 3D and
+  re-trigger the pass). The eject is produced LIVE each session, so working vs
+  broken saves are byte-identical (an exhaustive save diff finds nothing). And
+  the pass sweeps INVENTORY, not just worn slots, so un-equipping the offending
+  item doesn't stop it (still in inventory). Trigger = merely CARRYING an
+  instance-enchanted item; brand-new characters / NPCs without one are immune.
+- **Deeper fixes (future):** make the refresh idempotent (don't cycle when the
+  socket state is unchanged since last pass) and prefer refreshing the ability
+  in place (no full unequip/re-equip, so no anim event is emitted at all).
+
+Found fixing MEO's furniture-entry eject. Cross-ref MEO `Docs/ENGINE_NOTES.md`.
