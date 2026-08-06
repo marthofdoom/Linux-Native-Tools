@@ -29,7 +29,7 @@ the database; it travels through drop/pickup/containers/saves with no script:
 | `ExtraTextDisplayData` (0x99) | display name (see §2) |
 | `ExtraEnchantment` (0x9B) | the *created* enchantment (see §3) |
 
-## 2. Renaming an instance — the four traps
+## 2. Renaming an instance — the five traps
 
 1. **Force, never add-if-absent.** The engine lazily creates a *blank*
    `ExtraTextDisplayData` for any TEMPERED item (health ≠ 1.0) to render
@@ -52,6 +52,18 @@ the database; it travels through drop/pickup/containers/saves with no script:
    entry that kept the handle from its pickup can read a *stale* name from
    the old world ref. (The enchanting table's output never carries 0x1C —
    it mints a fresh entry.)
+5. **`displayName` INCLUDES the temper suffix after the reconcile.** After
+   `GetDisplayName(base, health)` (`RELOCATION_ID(12626, 12768)`),
+   `displayName` holds "Name (Fine)" and `customNameLength` is the length
+   *without* the temper string. Any string surgery (prefix swaps, ends-with
+   tests against the base name) must operate on
+   `displayName.substr(0, customNameLength)` or it silently fails on every
+   tempered item. Corollary: only a `kCustomName` record is a real custom
+   name — the engine's lazily-created blank (trap 1) is `kUninitialized` yet
+   holds the DECORATED name; treat it as custom and the next `GetDisplayName`
+   appends a *second* suffix ("… (Fine) (Fine)"). Gate name-capture on
+   `IsPlayerSet()` (the `kCustomName` comparison, and the only spelling that
+   compiles — the scoped enumerator isn't injected into class scope).
 
 ## 3. A functional instance enchantment (the SKSE recipe)
 
@@ -96,8 +108,17 @@ per-hit cost from magnitude, hence step 2).
 | `RE::TESCellAttachDetachEvent` | `{NiPointer<TESObjectREFR> reference; bool attached}` | **fires per reference**, not per cell — ideal for stamping world loot at load |
 | `SKSE::CrosshairRefEvent` | `{NiPointer<TESObjectREFR> crosshairRef}` | via `SKSE::GetCrosshairRefEventSource()`; read-only ground-ref diagnostics |
 
-Register TES events on `RE::ScriptEventSourceHolder`; defer all mutation to
-`SKSE::GetTaskInterface()->AddTask` (main-thread).
+Register TES events on `RE::ScriptEventSourceHolder`; keep sink bodies to a
+queue-only shim and defer mutation to `SKSE::GetTaskInterface()->AddTask`.
+**Caveat — AddTask does NOT run on the main thread in this runtime; see §21
+before mutating live engine state from a task.** `TESEquipEvent` dispatch is
+*synchronous* into follower AI and third-party outfit managers (guaranteed
+present in a heavy order), so cycling gear inside the handler re-enters them —
+snapshot `(object, xList, key)` tuples first and re-find live records by key at
+act time. A **global** SKSE actor event (`RegisterForActorAction`) fires for
+*every actor in the load order* and the cost is the dispatch, not the handler —
+bailing early inside the handler does not help; never build "react to every
+actor" on it.
 
 ## 5. Native message box with buttons (no UI framework)
 
@@ -718,3 +739,83 @@ chairs eject).
   in place (no full unequip/re-equip, so no anim event is emitted at all).
 
 Found fixing MEO's furniture-entry eject. Cross-ref MEO `Docs/ENGINE_NOTES.md`.
+
+## 26. `SKSE::GetTaskInterface()->AddTask` does NOT run on the main thread (MFO, crash-stack-proven)
+
+The KB long said "defer mutation to AddTask (main-thread)." **That is wrong for
+this runtime.** Field-proven three times from crash stacks
+(`… → skse64 task delegate → Job_Post_process → BSJobs::JobThread`): an AddTask
+body runs on a **BSJobs job-worker thread**, overlapping the cell-streaming
+threads — not the main thread. Re-queuing from inside a task lands on a worker
+one drain later, not on main. Consequences:
+
+- **`RE::TES::ForEachReferenceInRange` is unsafe in an exterior during a cell
+  stream** — its exterior branch ends with `worldSpace->GetSkyCell()`,
+  dereferencing the `TES::worldSpace` global while it is being rewritten
+  mid-transition → torn-pointer AV. Iterate the actor's own
+  `GetParentCell()->ForEachReferenceInRange(...)` (gated on `IsAttached()`)
+  instead — the cell method walks only that cell's list under the cell's
+  `BSSpinLock` and touches no worldspace/grid/skycell global.
+- **`PickUpObject`/`Activate` tear down 3D and mutate the cell → main-thread
+  only.** Loose-item pickup is therefore unreachable from an AddTask tick — make
+  it a package-acquisition feature (let the engine walk the actor and grab it).
+  Inventory *transfer* (`RemoveItem`/`AddItem`) does not tear 3D, so it is
+  worker-safe.
+- **The real road to main:** a `write_vfunc` on `RE::VTABLE_PlayerCharacter[0]`
+  index **`0x0AD`** (`Actor::Update(float)`) that drains a mutex-guarded queue —
+  fires once/frame on the main thread, player-only (hooking PlayerCharacter's
+  vtable, not Character's, = zero per-NPC cost). `Update` is
+  `SKYRIM_REL_VR_VIRTUAL`, so refuse to install on VR.
+
+Capture actors by **handle + copies** in any deferred body (a frame passes before
+it runs), never by reference.
+
+## 27. Native instance-manipulation traps (equip, inventory walks, poison)
+
+- **Two-handers must not be forced onto a hand slot when equip-cycling.** A
+  two-handed weapon (`WEAPON_TYPE::{kTwoHandSword, kTwoHandAxe, kBow,
+  kCrossbow}`) is worn as `kWorn`, never `kWornLeft`. Picking the equip slot from
+  the worn flag hands a two-hander `kRightHandEquip` — a slot it can't occupy;
+  the `applyNow` `ActorEquipManager::EquipObject` then completes only the
+  AIProcess combat-equip half (weapon fires) and silently **skips the
+  `ExtraWorn` stamp and 3D attach** → invisible-but-firing weapon, shown
+  unequipped, save-baked. **Pass `slot = nullptr` for two-handers** so
+  `ActorEquipManager` resolves the weapon's own BothHands slot; keep the explicit
+  left/right pick only for one-handers.
+- **`GetInventory()` returns a SNAPSHOT.** `InventoryEntryData`'s copy ctor
+  allocates a fresh `BSSimpleList<ExtraDataList*>`, so a `GetInventory()` map
+  hands you a copied entry + node-list (only the `ExtraDataList` pointees are
+  live). You may convert/equip-cycle an item mid-walk over a `GetInventory()`
+  map safely. The same walk over a **live** `changes->entryList` /
+  `extraLists` must snapshot-first (§18) — equip dispatch is synchronous into
+  every sink and head-inserts revisit the head. Verify which list you hold.
+- **`ExtraPoison` is the engine's own weapon-coating slot.** Replace it on the
+  equipped weapon's worn `ExtraDataList` to coat at runtime (engine flow — don't
+  hand-write poison state). Time-expiry must **sweep every weapon in the
+  inventory** (unequip can't bank remaining budget) and strip only *your* poison;
+  strip stale coatings at load (the clock is runtime-only — don't serialize
+  timers).
+- For `RemoveByType`, the AE `CombatController` +8 shift, `LookupByEditorID`
+  coverage, banned wider-than-intent calls, and the `unordered_map` rehash UB,
+  see [commonlibsse-ng-traps.md](commonlibsse-ng-traps.md).
+
+## 28. Station-menu takeover + MCM-Helper config discipline
+
+- **Crafting-station takeover: hide the menu AND eject the actor.** A
+  `MenuOpenCloseEvent` sink catching `CraftingMenu` can `kHide` the vanilla menu
+  and open a custom overlay, but while the player is still *seated* the engine
+  **re-activates `CraftingMenu` every few seconds**, flashing vanilla chrome
+  through the overlay. Eject the actor via
+  `NotifyAnimationGraph("IdleForceDefaultState")` on open *and* close. This is
+  furniture-type-specific — an enchanting bench does not re-activate, so "it
+  worked on the enchanting bench" is false evidence for the alchemy table. Verify
+  per furniture type.
+- **MCM-Helper reads a key absent from an *existing* Settings ini as OFF/zero**
+  (it does not fall back to `config.json` `defaultValue`), so a control added
+  after a user's first install looks dead. Backfill new keys into existing
+  `Settings/<mod>.ini` on deploy. Companion rules: **one bad field drops the
+  ENTIRE config** (bind controls with a top-level `"id":"key:Section"`, not
+  `"modSettingName"`; `minMcmVersion` required at root) — the tell that a config
+  registered is `Data/MCM/Settings/<mod>.ini` appearing; a key that changes
+  *meaning* must be **renamed** (§19); reset-then-parse each ReadConfig so an
+  absent key reverts to default.

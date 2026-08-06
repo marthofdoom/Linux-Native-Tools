@@ -82,3 +82,21 @@ script-property change. (MRO's audit reads a fixed path
 - `dump_record.py` hardcodes `.../Stock Game/Data/Skyrim.esm`.
 - `audit_esp.py` hardcodes the ESP/scripts paths.
 Lift the parsing logic; inject paths.
+
+## More record types (beyond the MRO originals)
+
+- **PACK (AI packages).** Ride a vanilla template (`Skyrim.esm` ships 104) via
+  `PKCU.template`; the QNAM-before-PKCU ordering rule, the `0x2000` preferred-
+  speed flag gate, and the target/alias layout are all in
+  [actor-ai-and-packages.md](actor-ai-and-packages.md) §7 — malformed PACKs load
+  silently and misbehave.
+- **Marker PERKs for DLL-driven perks.** Ship effect-less PERK records gated by a
+  `CTDA GetBaseActorValue(Skill) >= req` and read `HasPerk` from the DLL. A
+  ranked NNAM chain must set `numRanks` to the vanilla convention (dump
+  `Alchemist00` = 5); `numRanks=1` makes the Skills UI show an already-held rank.
+  Freeze the FormID band (generator↔DLL↔installer contract; only ever append).
+  See [load-order-agnostic-esp.md](load-order-agnostic-esp.md) §5.
+- **SEQ starts a quest on an EXISTING save.** A start-game-enabled quest listed
+  in `SEQ/<plugin>.seq` starts on an existing save (not just a new game) — which
+  is what lets an ESP-only alias-package PoC (§1 of the actor-AI doc) run without
+  a fresh game.

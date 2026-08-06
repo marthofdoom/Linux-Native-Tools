@@ -2,36 +2,50 @@
 
 Reference documentation for building Skyrim SE (1.6.1170 / AE) mods **entirely
 from Linux**, without xEdit, the Creation Kit, or a Windows box. Distilled from
-the `marth Requiem Overhaul` (MRO) project, which ships an ESP + Papyrus + a
-native SKSE DLL, all produced on Linux.
+the marth overhaul projects (MRO/MEO/MAO/MFO), which each ship an ESP + Papyrus
+and/or a native SKSE DLL, all produced on Linux.
 
 The **reference implementations** are the public sibling repos:
 
 | Repo | Local path (this machine) | Public URL | Covers |
 |---|---|---|---|
-| MRO | `../Requiem-modification/` | https://github.com/marthofdoom/MRO | pillars 1–4 |
-| MEO | `../marth-enchanting-overhaul/` | https://github.com/marthofdoom/MEO | pillar 5 (instance data / hook-free) |
-| MAO | `../marth-alchemy-overhaul/` | https://github.com/marthofdoom/MAO | load-order-agnostic ESP + native (in progress) |
+| MRO | `../Requiem-modification/` | https://github.com/marthofdoom/MRO | pillars 1–4 (ESP, Papyrus, CI DLL, hooks) |
+| MEO | `../marth-enchanting-overhaul/` | https://github.com/marthofdoom/MEO | pillar 5 (instance data / hook-free), pillar 8 (ImGui) |
+| MAO | `../marth-alchemy-overhaul/` | https://github.com/marthofdoom/MAO | pillar 9 (load-order-agnostic ESP + Synthesis/Mutagen patching) |
+| MFO | `../marth-follower-overhaul/` | https://github.com/marthofdoom/MFO | pillar 6 (actor AI / packages / casting / combat targets) |
+
+Also in the ecosystem: **[skyrim-linux-toolchain](https://github.com/marthofdoom/skyrim-linux-toolchain)**
+(private) — running the build/patch toolchain (Synthesis, Requtificator, …)
+fully native on headless Linux, driven by pointing at a modlist folder.
 
 When a doc says "see `tools/foo.py`", it means that file inside the relevant repo
 (e.g. `../Requiem-modification/tools/foo.py`, i.e.
 `github.com/marthofdoom/MRO/blob/main/tools/foo.py`). Read the real code; these
 docs explain the *why* and the traps.
 
-## The four pillars
+## The pillars
 
 | # | Doc | What it lets you do without Windows tooling |
 |---|-----|---------------------------------------------|
-| 1 | [esp-without-xedit.md](esp-without-xedit.md) | Generate a valid ESP/ESL from Python by emitting raw records. No xEdit, no CK. |
+| 1 | [esp-without-xedit.md](esp-without-xedit.md) | Generate a valid ESP/ESL from Python by emitting raw records (incl. PACK, marker PERKs). No xEdit, no CK. |
 | 2 | [papyrus-on-linux.md](papyrus-on-linux.md) | Compile `.psc` → `.pex` under Proton's wine. |
 | 3 | [native-dll-via-github-actions.md](native-dll-via-github-actions.md) | Build a CommonLibSSE-NG SKSE DLL on GitHub Actions (Windows runner) driven from a Linux push. |
-| 4 | [known-hooks.md](known-hooks.md) + [hook-site-verification.md](hook-site-verification.md) | Catalog of proven engine hook sites + how to prove a site is safe before shipping. |
-| 5 | [instance-data-and-events.md](instance-data-and-events.md) | Hook-free native mods: per-instance item data (rename/enchant that persists in the .ess), event sinks, native message boxes, co-save discipline. From the MEO project. |
+| 4 | [known-hooks.md](known-hooks.md) + [hook-site-verification.md](hook-site-verification.md) | Catalog of proven engine hook sites (call-site + vtable-index) + how to prove a site is safe before shipping. |
+| 5 | [instance-data-and-events.md](instance-data-and-events.md) | Hook-free native mods: per-instance item data, event sinks, message boxes, co-save discipline, threading. (MEO) |
+| 6 | [actor-ai-and-packages.md](actor-ai-and-packages.md) | Command an NPC you don't own: packages via quest aliases, casting, combat-target steering. (MFO) |
+| 7 | [commonlibsse-ng-traps.md](commonlibsse-ng-traps.md) | CommonLibSSE-NG library bugs that compile into your DLL and crash at *your* offset. (cross-cutting) |
+| 8 | [imgui-overlay-and-input.md](imgui-overlay-and-input.md) | In-process ImGui overlay + input inside the game's DX11 present. (MEO) |
+| 9 | [load-order-agnostic-esp.md](load-order-agnostic-esp.md) | Ship a plugin that behaves on *any* load order: dynamic-or-drop + Synthesis/Mutagen patching. (MAO) |
 
-## Future GUI tools (stubs)
+## GUI tools (spun out of the stubs)
 
-- [stubs/perk-tree-editor.md](stubs/perk-tree-editor.md) — visual PERK/perk-tree editor, ESP out via the pillar-1 approach.
-- [stubs/mcm-pex-editor.md](stubs/mcm-pex-editor.md) — SkyUI MCM editor that patches compiled `.pex` directly.
+- **MCM editor** — graduated to its own repo:
+  [marthofdoom/MCM-Editor](https://github.com/marthofdoom/MCM-Editor)
+  (Linux-native GUI that patches compiled `.pex` string tables directly). Design
+  stub: [stubs/mcm-pex-editor.md](stubs/mcm-pex-editor.md).
+- **Perk-tree editor** — in progress (`../Perk-Tree-Editor/`); visual PERK/AVIF
+  editor, ESP out via the pillar-1 approach. Design stub:
+  [stubs/perk-tree-editor.md](stubs/perk-tree-editor.md).
 
 ## Core doctrine (applies everywhere)
 

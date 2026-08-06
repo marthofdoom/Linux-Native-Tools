@@ -126,3 +126,31 @@ bool Install() {
     return true;
 }
 ```
+
+---
+
+## Vtable-index hooks — a more robust class (layout-independent)
+
+`write_vfunc` on a vtable **index** does not drift across game updates (unlike
+the addrlib call-site offsets above), so re-verification after a game update is
+lighter. Sites proven in MEO/MAO/MFO:
+
+| # | Site | Signature / job | Notes |
+|---|---|---|---|
+| **3** | `PlayerCharacter::VTABLE[0]` index **`0x10F`** — `DrinkPotion` | intercept item consumption | The universal drink funnel — also catches auto-potion mods, so it doubles as the compat intercept. Return `true` (handled) to stop vanilla destroying an item you keep. **SSE/AE index only — VR shifts the Actor vtable; bail on `REL::Module::IsVR()`.** (MAO) |
+| **4** | `RE::VTABLE_Character[0]` index **`0xE4`** — `UpdateCombat` | steer combat targets | After the original, write **both** `currentCombatTarget` and `combatController->targetHandle`(+prev) under `BSReadLockGuard(combatGroup->lock)`. Re-assert **only when a target already exists**; targets aren't sticky (re-picked every call). See [actor-ai-and-packages.md](actor-ai-and-packages.md) §6. (MFO) |
+| **5** | `CombatMagicCaster::CheckStartCast` index **`0x06`** | *influence* a follower's casting (remove the AI veto; don't insert a cast) | Prefer influence over insertion. **Validate the runtime vtable is a real derived class** — `VTABLE_CombatMagicCasterArmor` is a symbol with no class (index 6 = a different fn → CTD). `CombatMagicCasterRestore` also casts *potions* — gate on `formType == Spell`. (MFO) |
+| **6** | `PlayerCharacter::VTABLE[0]` index **`0x0AD`** — `Actor::Update(float)` | genuine main-thread pump | Drain a mutex-guarded queue once/frame on the main thread, player-only. The correct home for work AddTask can't do (§26 of instance-data). `SKYRIM_REL_VR_VIRTUAL` — bail on VR. (MFO) |
+
+## Hook 3 — Leveled-list counts (no address dependency)
+
+There is **no Papyrus/po3 API to write leveled-list counts at runtime** (po3
+only reads them). To change them dynamically on any load order, a native DLL
+rewrites the LVLI entries in memory at `kDataLoaded` (Hook 0 is the vendor-gold
+instance of this). Testing gotcha: after any LVLI change, merchant gold/stock is
+unchanged until the merchant chest **re-rolls on cell reset** — wait 72+ in-game
+hours away from the cell before judging the result.
+
+> **VR caution for all vtable hooks:** any index above is SSE/AE; the VR runtime
+> shifts vtables. Gate installs on `REL::Module::IsVR()` and refuse, or source a
+> VR-specific index.
