@@ -36,6 +36,7 @@ docs explain the *why* and the traps.
 | 7 | [commonlibsse-ng-traps.md](commonlibsse-ng-traps.md) | CommonLibSSE-NG library bugs that compile into your DLL and crash at *your* offset. (cross-cutting) |
 | 8 | [imgui-overlay-and-input.md](imgui-overlay-and-input.md) | In-process ImGui overlay + input inside the game's DX11 present. (MEO) |
 | 9 | [load-order-agnostic-esp.md](load-order-agnostic-esp.md) | Ship a plugin that behaves on *any* load order: dynamic-or-drop + Synthesis/Mutagen patching. (MAO) |
+| 10 | [resaver-headless-save-inspection.md](resaver-headless-save-inspection.md) | Read a `.ess` directly on Linux (ReSaver-as-library + own ACHR parse): dump any NPC's inventory / worn / phantom items headlessly. Tool: [tools/DumpNPCInventory.java](tools/DumpNPCInventory.java). |
 
 ## GUI tools (spun out of the stubs)
 
