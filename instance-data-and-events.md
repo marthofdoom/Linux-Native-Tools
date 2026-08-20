@@ -819,3 +819,41 @@ it runs), never by reference.
   registered is `Data/MCM/Settings/<mod>.ini` appearing; a key that changes
   *meaning* must be **renamed** (§19); reset-then-parse each ReadConfig so an
   absent key reverts to default.
+
+## 29. A weapon enchant's MAGIC effect ignores friendly fire — gate detrimental effects to enemies with effect-entry CTDA (MEO v1.0.14 / m53, field-confirmed 2026-08-20)
+
+Field report: a follower's gem-socketed weapon (a plain "damage magicka on hit"
+enchant) drained a nearby ALLY's magicka and the WIELDER's own magicka. Friendly
+fire was off, and the Precision combat mod was active. Neither stopped it.
+
+Why: the engine's friendly-fire setting — and Precision — suppress only the
+**physical** hit between an NPC and its allies/the player. The weapon
+enchantment's **magic effect** is applied to whatever the blade contacts
+regardless, so in a melee scrum a follower's enchant lands on allies, the
+player, and (via impact/scrum) the wielder himself. This is true for ANY
+enchanted NPC weapon, vanilla or modded, single-target (area 0) included — it is
+not an area/AoE artifact. The MGEF's Hostile/Detrimental flags do not gate it.
+
+Fix that works: attach **effect-entry conditions** (CTDA on the ENCH effect
+item, the layer that does NOT travel when copying — see §13) at runtime, AFTER
+`BGSCreatedObjectManager::AddWeaponEnchantment` returns, on the created
+enchant's OWN effect copies (`ench->effects[i]->conditions.head`), never on the
+local by-value effect array (it destructs). Gate to enemies:
+
+- `Subject.GetIsID(Player 0x00000007) == 0`  (never the player)
+- `Subject.GetPlayerTeammate == 0`           (never a follower — nor the
+                                              wielder, who is his own teammate)
+
+`CONDITIONITEMOBJECT::kSelf` = CK "Subject" = the actor the effect is applied to
+(the struck actor); `kTarget` is NOT the victim. FunctionID: `kGetIsID`=72,
+`kGetPlayerTeammate`=453. `TESConditionItem` uses the game heap
+(`TES_HEAP_REDEFINE_NEW`), so `new RE::TESConditionItem()` is correct. Scope
+gap (accepted): non-teammate allies (guards, quest allies, summons/thralls) are
+not covered by these two functions.
+
+Two traps: (1) `Add*Enchantment` dedupes to a SHARED FF form and the rebuild
+re-runs constantly, so gating must be IDEMPOTENT — a non-null `conditions.head`
+means already-gated (fresh mints are born bare). (2) Whether the CTDA chain
+persists in the save's created-ENCH record is unverified (player enchanting
+never emits entry CTDA, so the save format may drop it); re-mint worn gear on
+load as insurance and log the as-loaded `conds=` to settle it.
