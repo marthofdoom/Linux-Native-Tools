@@ -98,6 +98,46 @@ on long playthroughs with thousands of records. **Correct order:** move the valu
 into a local, let the iterator go, *then* insert. Applies to any long-lived
 native map keyed by runtime state.
 
+## 6. A declared vfunc signature is **not** an ABI — the hidden `sret` out-slot
+
+NG declares `CombatMagicCaster::GetMagicTarget` (vtable slot `0x0A`) as an
+ordinary function returning a handle. The compiled engine function does not have
+that shape: it returns a **16-byte aggregate through a hidden out-pointer**
+(`sret`), which the MSVC ABI passes in the FIRST argument register and shifts
+every declared argument one register to the right. A thunk written against NG's
+declaration therefore reads `this` out of the out-pointer slot and writes the
+return value over an argument.
+
+The cost of trusting the header: a probe that was **read-only, chained the
+original, and changed no behaviour** — as passive as a hook can be — crashed the
+game on the first cast. Passivity does not protect you from a wrong signature.
+Nothing about "I only observe" survives a mis-shaped call frame.
+
+**Cure, and it is not optional for any vtable hook:**
+
+1. **Disassemble the target's own implementation** and read what it actually does
+   with `rcx`/`rdx`/`r8`/`r9` before you write the `decltype`. If the first thing
+   it does is store a pointer you did not expect, you have an `sret`.
+2. **Prefer reading a `static_assert`ed FIELD over calling a vfunc.** A wrong
+   offset gives you a wrong value (bad, recoverable); a wrong signature corrupts
+   the frame (fatal, and it lands at *your* address). For an observation probe
+   this hardens into a rule: **a probe reads fields, it never calls engine
+   vfuncs.** If a value is only reachable through a vfunc, get it from
+   disassembly instead of instrumenting it.
+3. **A vtable symbol is not a class.** `VTABLE_CombatMagicCasterArmor` exists as a
+   symbol with nothing deriving `CombatMagicCaster` behind it, so its slot 6 is a
+   different function entirely — hooking it derefs a garbage `this`. Match the
+   RTTI **type**, never the symbol name (see
+   [hook-site-verification.md](hook-site-verification.md)).
+
+**The counter-example matters just as much:** `EffectSetting::data` at `0x068`,
+with `associatedSkill` at data+0x10, `minimumSkill` +0x40, `archetype` +0x58,
+`primaryAV` +0x5C, `delivery` +0x74, **is exactly right** — an earlier note in
+this project claiming otherwise was wrong and was struck. The rule is therefore
+"**verify each one**", not "distrust the library wholesale". Header-shaped
+paranoia costs as much time as header-shaped trust; disassembly is the only thing
+that settles it either way.
+
 ---
 
 ## The meta-rule

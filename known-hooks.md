@@ -154,3 +154,104 @@ hours away from the cell before judging the result.
 > **VR caution for all vtable hooks:** any index above is SSE/AE; the VR runtime
 > shifts vtables. Gate installs on `REL::Module::IsVR()` and refuse, or source a
 > VR-specific index.
+
+---
+
+## Catalog — combat-AI cast pipeline (1.6.1170 / AE), verified by disassembly
+
+Reversed 2026-09 against the decrypted 1.6.1170 image. RVAs are of that image;
+`AE nnnnn` are Address-Library AE ids. The mechanism these sites belong to is
+documented in [actor-ai-and-packages.md](actor-ai-and-packages.md) §10 — read
+that first, because most of these are only reachable if an **upstream** one
+admitted the candidate. Every one is a `write_vfunc` slot (layout-independent)
+unless the row says otherwise; guard them per
+[hook-site-verification.md](hook-site-verification.md).
+
+### Vtables
+
+| Object | vtable RVA | AE id | notes |
+|---|---|---|---|
+| `CombatMagicItemData` (the per-spell caster-type resolver) | `0x18d5120` | **211955** | **slot 1** = the per-effect classifier `0x81d830` (AE 45321). RTTI `.?AVCombatMagicItemData@@`. Stack-local, one per spell evaluation |
+| the affordability/skill visitor | `0x18d5138` | 211957 | slot 1 = `0x81de80` (AE 45328) — the `minimumSkill` gate |
+| `CombatMagicCasterRestore` | `0x18cc890` | 211142 | `GetCategory` = 1 |
+| `CombatMagicCasterOffensive` | `0x18cc4a0` | — | `GetCategory` = 0 |
+| `CombatInventoryItemMagicT<Magic, Restore>` | `0x18d0570` | 211612 | 23 slots (0x00..0x16) |
+| `CombatInventoryItemMagicT<Magic, Offensive>` | `0x18d0ff0` | — | the twin |
+
+> Two RVAs published elsewhere for the caster vtables (`0x1709eb8` /
+> `0x170adc0`) are **NOT valid on this binary** — do not use them.
+
+### Item vtable slots (all `CombatInventoryItem` subclasses)
+
+| slot | name | notes |
+|---|---|---|
+| `0x0B` | `GetCategory` | Restore/Magic `0x832580` = `return 1`; Offensive `0x8341a0` = `return 0` |
+| `0x0C` | `CalculateScore` | **all 80 magic templates share `0x819aa0` -> `0x819c10`** — one function-level trampoline covers them all. Weapon classes have their own: Melee `0x8183e0`, Ranged `0x8188b0` (helper `0x8189d0`; a bow with no arrows scores 0), Shield `0x818df0`, Torch `0x819480` |
+| `0x0D` | `Clone` | used for per-hand duplication |
+| `0x0E` | `CheckBusy` | `0x819da0` — **not** consulted by the selection loop |
+| `0x0F` | `CheckShouldEquip` | the equip ADMISSION seat. Base magic impl is `return true`; the Restore templates route to the static `0x81f7c0` (AE 45371), which is the vanilla self/foe health gate. Restore<Magic> thunk `0x832650` (AE 46304) |
+| `0x10` | `GetResource` | `0x8199b0` — cannot drop an item (both branches reach AddItem) |
+| `0x15` | `CreateCaster` | Restore/Magic `0x832510` -> caster ctor `0x81f710`. **Virtual only, no direct callers** |
+
+### Caster vtable slots (`CombatMagicCaster` family)
+
+| slot | name | notes |
+|---|---|---|
+| `0x06` | `CheckStartCast` | Restore `0x81f980` (AE 45372); Offensive `0x81e7b0` |
+| `0x07` | `CheckStopCast` | Restore `0x81faf0` (AE 45373) |
+| `0x0A` | `GetMagicTarget` | shared base `0x81e020` (AE 45336) — `kSelf ? attacker : controller.target`. **See the ABI trap in [commonlibsse-ng-traps.md](commonlibsse-ng-traps.md) §6 before hooking this one** |
+| `0x0B` | `NotifyStartCast` | `0x81fc60` |
+| `0x0D` | `SetupAimController` | aim-target override |
+
+### Non-virtual functions and data (trampoline / read sites)
+
+| what | RVA | AE id |
+|---|---|---|
+| `CombatInventory::Init` | `0x80f010` | 44857 |
+| `CombatInventory::Update` | `0x80f380` | 44858 |
+| `CombatInventory::Rebuild` | `0x811030` | 44879 |
+| item factory (form -> `CombatInventoryItem`) | `0x811cc0` | 44882 |
+| per-hand add / clone | `0x811ac0` | — |
+| equipment selector | `0x8134c0` | 44899 |
+| `CombatEquipment::AddItem` | `0x80e490` | — |
+| caster-type row table (23 rows) | `0x20163b0` | 382289 |
+| caster-type row hash map | `0x31ab790` | 405245 |
+| row-table init | `0x81dc90` | 45326 |
+| **category preemption order** `[1,2,4,0,3,5,0,6]` | `0x20162c8` (count at `0x20162f0`) | — |
+| `MagicItem::VisitEffects` (dispatches `visitor->vtable[1]`) | `0x14c780` | — |
+| `Actor::VisitSpells` | — | `RELOCATION_ID(37827, 38781)` |
+| `MagicCaster::CastSpell(spell, target, bool)` | `0x5bb720` | 34401 |
+| the AI's cast-fire helper | `0x89ee30` | 49083 |
+| `CombatBehaviorContextMagic::ctor` (mints the caster) | `0x89eae0` | — |
+| `Actor::SetWantCast` (graph bools) | `0x69c120` | 37950 |
+| `IsCastingSourceReady` | `0x6b91e0` | — |
+| `CombatController::Update` | `0x5589b0` | 33217 |
+| `CombatManager::StartCombat(actor, target)` | `0x83d180` | 46873 |
+| `CombatManager::StartCombat(actor, group)` | `0x83d2c0` | 46874 |
+
+### `Actor::StartCombat` — a 3-argument ABI
+
+`0x6b6930`, **AE 38561 / SE 37608**:
+`bool StartCombat(Actor* this, Actor* target /*nullable*/, CombatGroup* group /*nullable*/)`.
+**R8 is dereferenced when non-null**, so a two-argument call passes garbage and
+crashes. Semantics and refusal conditions:
+[actor-ai-and-packages.md](actor-ai-and-packages.md) §11.
+
+### Combat behaviour tree
+
+`VTABLE_CombatBehaviorTreeNode` (AE 212199) plus ~70
+`VTABLE_CombatBehaviorTreeNodeObject_*` leaves already carry Address-Library ids
+in CommonLibSSE-NG's `Offsets_VTABLE.h`, but **no C++ class exists** for them in
+the pinned tree — you must declare the vtable slots yourself. Slot `0x02` is
+`act()` ("enter") and slot `0x03` is `pop()`.
+
+> **Deny a leaf in PAIRS or corrupt the game.** `act()` PUSHES per-thread state on
+> the behaviour thread's data stack and the runner calls that SAME node's `pop()`
+> immediately after; `pop()` removes exactly what its own `act()` pushed. Push
+> sizes differ per leaf (4 for most, 0xC for the cast/ranged leaves, 0x18/0x30 for
+> others; the context-creation nodes push 0x30). Substituting a foreign `act()`
+> whose push size differs from the node's own `pop()` drifts the stack and
+> eventually crashes far away, in an interrupt unwind, with a garbage current
+> node. The safe substitution is to run `CombatBehaviorForceFail`'s **own**
+> compiled `act()` and `pop()` (4/4) as a pair — never a hand-rolled `SetFailed`,
+> never `act()` alone. This was a months-live CTD.
