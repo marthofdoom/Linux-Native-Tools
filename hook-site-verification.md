@@ -160,3 +160,19 @@ It is not there to explain. Rules learned the expensive way:
 - **Budget the volume explicitly and cap it.** A real session baseline was
   ~40-65 lines/minute per plugin; a probe that doubles that hides its own signal.
   Cap the session, self-disable at the cap, and print that you did.
+
+## SteamStub-packed SkyrimSE.exe: unpack once, store forever; and the jmp-thunk trap (2026-09-21)
+
+- Steam ships SkyrimSE.exe with SteamStub v3.1.2 (`.text` AES-encrypted, entropy 8.00). `.rdata` (vtables,
+  RTTI, strings) is PLAINTEXT, so vtable/slot/id work never needed the unpack; instruction-level work does.
+- `tools/steamstub-rtti/unpack_steamstub.py <packed> <out>`: reads the stub header at EP-0xF0 (XOR-rolled),
+  signature 0xC0DEC0DE/0xC0DEC0DF, AES-256 key + ECB-decrypted IV, CBC-decrypts .text with the 16 stolen
+  header bytes prepended, restores the OEP, keeps the file layout (raw = 0x400 + rva - 0x1000 for .text).
+  Flags & 0x04 = NoEncryption -> the image is already plaintext (1.7.104 ships that way).
+- Permanent unpacked copies: MFO repo `binaries/<ver>/SkyrimSE.unpacked.exe` (gitignored). Do not re-derive.
+- **TRAP:** Address Library ids for many "impl" functions land on a 5-byte `E9 rel32` thunk padded with INT3,
+  not the body. Read the first byte; if E9, body = rva + 5 + rel32. Example:
+  IAnimationGraphManagerHolder::NotifyAnimationGraph AE 38048 0x6a35f0 -> 0x54c450; SE 37020 0x60f240 -> 0x4f12c0.
+- Tail-jump vtable dispatch shows up as `48 8b 01 48 ff 60 NN` (`mov rax,[rcx]; jmp [rax+NN]`) = slot NN/8;
+  seen at CombatAnimation::Execute (AE 0x7f9470 / SE 0x75ff10, slot 5 = TESActionData::Process).
+- Full id map for the NPC attack-pick chain: MFO/APMF `Docs/ADDRESS-TABLE-2026-09-15.md` §5.
