@@ -176,3 +176,73 @@ It is not there to explain. Rules learned the expensive way:
 - Tail-jump vtable dispatch shows up as `48 8b 01 48 ff 60 NN` (`mov rax,[rcx]; jmp [rax+NN]`) = slot NN/8;
   seen at CombatAnimation::Execute (AE 0x7f9470 / SE 0x75ff10, slot 5 = TESActionData::Process).
 - Full id map for the NPC attack-pick chain: MFO/APMF `Docs/ADDRESS-TABLE-2026-09-15.md` §5.
+
+---
+
+## Procedure checklist: verify an address, vfunc or hook site
+
+**When:** before writing any hook, trampoline, vtable write or raw offset, and
+before trusting any address a note, a header or another agent gave you. The
+sections above explain the why. This is the order to do it in.
+
+**Prerequisites:** the game exe for the runtime you target, the matching
+Address Library file, `llvm-objdump` (or capstone), Python 3 with
+`cryptography` (for the unpacker). Tools live in
+[tools/steamstub-rtti/](tools/steamstub-rtti/). Run them from that directory.
+`addrlib.py` and `rtti.py` hardcode their input paths (the Address Library
+files and the exe), so edit
+those for your machine.
+
+1. **Pick the right Address Library file for the exe build.** AE ships two:
+   `versionlib-1-6-1170-0.bin` (exe 1.6.1170.0) and
+   `versionlib-1-6-1170-0-1.bin` (exe 1.6.1170.1). The wrong one decodes
+   cleanly about 0x930 off. Self-check before anything else: id `38048` must
+   give `0x6A35F0` (`-0.bin` does, `-0-1.bin` gives `0x6A2CC0`). SE 1.5.97
+   uses `version-1-5-97-0.bin`. The running game always loads the matching
+   file, so this trap is offline-only.
+2. **Unpack the exe once and keep it.** `.text` is SteamStub-encrypted on disk.
+   ```bash
+   python3 unpack_steamstub.py SkyrimSE.exe SkyrimSE.unpacked.exe
+   ```
+   `.text` entropy near 8.0 means still encrypted, about 6.0 means clean. A
+   stub with flag `0x04` (NoEncryption) is already plaintext (1.7.104). On the
+   dev box the unpacked copies are in MFO's gitignored `binaries/<ver>/`.
+   `.rdata` (vtables, RTTI, strings) is plaintext even when packed.
+3. **Decode the id.**
+   ```bash
+   python3 addrlib.py ae:38048 se:37020 ae:0x54c450   # id -> rva, rva -> containing id
+   ```
+4. **Map rva to file offset** in the unpacked image (layout preserved):
+   `raw = 0x400 + rva - 0x1000` for `.text`.
+5. **Follow a jmp thunk.** If the first byte at the id is `E9`, the id is a
+   5-byte thunk and the body is at `rva + 5 + rel32`. Example: AE `0x6A35F0`
+   holds `e9 5b 8e ea ff`, body `0x54C450`.
+6. **Disassemble the real bytes.** The image base is `0x140000000`.
+   ```bash
+   llvm-objdump -d -M intel --no-show-raw-insn \
+     --start-address=0x14054c450 --stop-address=0x14054c4a0 SkyrimSE.unpacked.exe
+   ```
+   For a call-site hook, the byte at `site` must be `E8` (call) or `E9` (jmp)
+   as your thunk expects.
+7. **For a vfunc, find the slot from the vtable, not from a header.**
+   ```bash
+   python3 rtti.py ae '\.\?AVCombatMagicCasterRestore@@' 8   # regex of the full RTTI name
+   ```
+   It prints the vtable rva and each slot's target rva and id. Disassemble the
+   slot target and read the signature from register use: which of
+   `rcx/rdx/r8/r9` it reads, and whether it writes through `rdx` and returns it
+   in `rax` (a hidden `sret` out-slot that the CommonLib declaration may omit,
+   see [commonlibsse-ng-traps.md](commonlibsse-ng-traps.md) §6). Only then
+   compare with the pinned CommonLib header. Known defect: `rtti.py` crashes
+   with `re.PatternError` for some classes (e.g. `Character`) because it feeds
+   raw rva bytes to `re.finditer` unescaped.
+8. **Do it per runtime.** Every id and offset is verified separately on AE and
+   SE. A layout valid on one is not assumed on the other.
+9. **Check the live game when you can.** `verify_hook_site_live.py` (MRO repo,
+   above) reads `/proc/<pid>/mem` of the running exe.
+10. **Observe it running before building on it.** A path that exists in the
+    disassembly may never execute. Add a passive, rate-limited log at the site
+    (see the passive-probe rules above) and confirm it fires in a real session.
+
+Record what you verified (id, rva, bytes, runtime, which .bin) next to the code
+or in the repo's address table, so the next person does not redo it.

@@ -100,3 +100,50 @@ Lift the parsing logic; inject paths.
   in `SEQ/<plugin>.seq` starts on an existing save (not just a new game) — which
   is what lets an ESP-only alias-package PoC (§1 of the actor-AI doc) run without
   a fresh game.
+
+## Procedure: regenerate, audit and inspect a generated plugin (MFO flow)
+
+**When:** any change to a record, a FormID, a script property, an MCM file the
+generator writes, or the generator itself. The emitted plugin is a build
+product. Never hand-edit it.
+
+MFO: `MFO_GenerateESP.py` writes `out/MFO.esp`, `out/MFO_Progression.esl` (+
+`.esp`), `out/SEQ/*.seq` and the MCM configs. APMF: `APMF_GenerateESL.py`
+writes `Data/APMF.esl`. MEO: `MEO_GenerateESP.py` writes `out/MEO.esp`.
+
+```bash
+python3 MFO_GenerateESP.py out            # regenerate everything under out/
+python3 tools/audit_esp.py                # no args = audit every emitted plugin, must print PASS
+python3 tools/audit_mcm.py                # MCM wiring gate, must print PASS
+git diff --stat out/                      # what actually changed
+```
+
+**Check determinism.** Generating twice must give identical bytes. APMF's
+release script depends on it (it regenerates and `cmp`s against the committed
+ESL):
+```bash
+python3 MFO_GenerateESP.py /tmp/esp-check >/dev/null && cmp /tmp/esp-check/MFO.esp out/MFO.esp && echo IDENTICAL
+```
+
+**Inspect a record** with `tools/esp_inspect.py` (MFO) instead of a throwaway
+parser. It inflates compressed records and decodes the structures MFO uses.
+```bash
+python3 tools/esp_inspect.py out/MFO.esp                   # summary: masters, counts
+python3 tools/esp_inspect.py out/MFO.esp --list QUST       # FormID + EDID per record
+python3 tools/esp_inspect.py out/MFO.esp --dump 0x01000808 # full FormID or EDID, ordered subrecords
+python3 tools/esp_inspect.py "<Stock Game>/Data/Skyrim.esm" --dump <EDID>   # the vanilla twin
+```
+
+**Subrecord order matters to tools even when the game does not care.** The
+engine loads out-of-order subrecords, and `audit_esp.py` passes them, but
+xEdit, Vortex and Synthesis reject them. After touching any record maker, dump
+the same record type from `Skyrim.esm` and match its order (MFO invariant #75:
+QUST puts `VMAD` right after `EDID`, MESG is `EDID, DESC, FULL, INAM, DNAM`).
+
+**Frozen contract.** FormIDs in the generator are mirrored in the DLL (MFO:
+`native/Forms.h`, APMF: the channel code). Only append. A changed FormID orphans
+every save that saw it.
+
+**Verify in game:** `help <EditorIDprefix> 0` in the console lists the loaded
+forms. A record missing there but present offline was rejected silently. Diff
+it against its vanilla twin.

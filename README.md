@@ -38,6 +38,26 @@ docs explain the *why* and the traps.
 | 9 | [load-order-agnostic-esp.md](load-order-agnostic-esp.md) | Ship a plugin that behaves on *any* load order: dynamic-or-drop + Synthesis/Mutagen patching. (MAO) |
 | 10 | [resaver-headless-save-inspection.md](resaver-headless-save-inspection.md) | Read a `.ess` directly on Linux (ReSaver-as-library + own ACHR parse): dump any NPC's inventory / worn / phantom items headlessly. Tool: [tools/DumpNPCInventory.java](tools/DumpNPCInventory.java). |
 
+## Basic procedures (index)
+
+Step-by-step recipes for the everyday work, each with prerequisites, exact
+commands, how to verify success and the common failures. Sourced from how MFO,
+APMF and MEO actually do it. Where the repos differ, the page says so.
+
+| # | Procedure | Where |
+|---|---|---|
+| 1 | Compile a DLL on GitHub Actions and prove the green run is yours, download DLL + PDB | [native-dll-via-github-actions.md](native-dll-via-github-actions.md#procedure-compile-a-dll-and-prove-the-green-run-is-yours) |
+| 2 | How CommonLibSSE-NG reaches the build (vcpkg registry + baseline) and verifying a symbol against the pinned 3.7.0 | [native-dll-via-github-actions.md](native-dll-via-github-actions.md#procedure-where-commonlibsse-ng-comes-from-and-verifying-a-symbol) |
+| 3 | Cut a release: MFO two-phase `release.sh`, changelog, MANIFEST, `gh release`, the Progression add-on, APMF and MEO | [releasing.md](releasing.md) |
+| 4 | Deploy to a test machine: MO2 mod folder, keep local INIs, sha256 on the target, Steam Deck over ssh, syncthing | [deploy-and-logs.md](deploy-and-logs.md#deploy) |
+| 5 | Read plugin, SKSE, MCM Helper and CrashLogger logs under Proton, and symbolize a crash frame with the PDB | [deploy-and-logs.md](deploy-and-logs.md#read-logs) |
+| 6 | Verify an engine address, vfunc or hook site (SteamStub unpack, Address Library decode, jmp thunks, disassembly) | [hook-site-verification.md](hook-site-verification.md#procedure-checklist-verify-an-address-vfunc-or-hook-site) |
+| 7 | Regenerate, audit and inspect a generated ESP/ESL | [esp-without-xedit.md](esp-without-xedit.md#procedure-regenerate-audit-and-inspect-a-generated-plugin-mfo-flow) |
+| 8 | Compile Papyrus on Linux and ship the `.pex` | [papyrus-on-linux.md](papyrus-on-linux.md#procedure-compile-verify-ship-how-mfo-and-meo-run-it) |
+| 9 | Build and validate an MCM Helper config (the silent-failure rules) | [mcm-helper-config.md](mcm-helper-config.md) |
+| 10 | Add or change a co-save record (versions, readers, revert before load) | [instance-data-and-events.md](instance-data-and-events.md#procedure-add-or-change-a-co-save-record) |
+| 11 | Git hygiene: worktrees, branch names, reviewing a branch, the diffstat anomaly check | [git-review-hygiene.md](git-review-hygiene.md) |
+
 ## GUI tools (spun out of the stubs)
 
 - **MCM editor** — graduated to its own repo:
