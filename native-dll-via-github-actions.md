@@ -290,8 +290,10 @@ grep -rn "GetGoldAmount" "$P/include" "$P/src"     # declared? defined?
 float it. Any edit to either vcpkg file changes the cache key and costs one
 cold build.
 
-**Forward note (in progress, not final).** An MIT-licensed fork of CommonLib
-3.7 served from our own vcpkg registry is being introduced (stage F0, on an
-MFO branch at the time of writing). Until it merges, `main`'s
-`native/vcpkg-configuration.json` is authoritative. Read that file, not this
-note, to learn what a given build compiled against.
+**Update (2026-09-23): the MIT fork is live for MFO and APMF.** Both now build
+CommonLib from `marthofdoom/CommonLibSSE-NG` branch `mit-3.7` (3.7.0 plus a README),
+served by `marthofdoom/vcpkg-registry`. The build was proven byte-identical to the
+colorglass one. Later stages will add corrections and 1.7.104 support, so the pinned
+3.7.0 tree stays the symbol reference until the fork diverges. The registry's history
+must only ever grow, because consumers pin its baseline. As always, read each repo's
+`native/vcpkg-configuration.json` to learn what a given build compiled against.
