@@ -150,6 +150,46 @@ The `- 4` offset on the callback message is the trap everyone hits.
 - One-time grants (starter kits): only consume the persisted flag when the
   grant actually succeeded — a missing ESP must retry next load, not burn it.
 
+### Procedure: add or change a co-save record
+
+Worked example: MFO `native/Serialization.h` (ids, versions) and
+`Serialization.cpp` (`SaveCallback`, `LoadCallback`, `RevertCallback`).
+
+**Registration** (once, at plugin load):
+```cpp
+auto* s = SKSE::GetSerializationInterface();
+s->SetUniqueID('MFO0');            // plugin id, frozen forever
+s->SetSaveCallback(SaveCallback);
+s->SetLoadCallback(LoadCallback);
+s->SetRevertCallback(RevertCallback);
+```
+
+**Each record is a fourCC plus its own version** (MFO: `FLWR`, `MSTK`,
+`PRGN`, `FWPN`, each with a `k...Version` constant). Steps for a change:
+1. **Append, never reorder.** New fields go at the end, behind a version bump.
+   Changing the order, type or count of an existing field corrupts every live
+   save. So does renaming a fourCC or renumbering a serialized enum.
+2. **Bump that record's version** and write only the newest layout.
+3. **Keep a reader for every version that ever shipped.** Branch on it:
+   `if (version >= N) read the new field, else default it`.
+4. **A record newer than this DLL is skipped, loudly, not aborted.** In the
+   `GetNextRecordInfo` loop, `continue` past it (the next call seeks over the
+   unread body), log an error, and keep reading the other records. Returning
+   early drops the sibling records, and the next save writes them back empty.
+   Also tell the user: SKSE does not round-trip unread records, so saving on the
+   older DLL destroys that data.
+5. **Resolve every stored FormID** with `ResolveFormID` on load and drop what
+   fails to resolve (§17). Never fabricate a replacement.
+6. **Revert before load.** SKSE calls the revert callback on every load and new
+   game before the load callback. Revert clears ALL save-scoped state. If a
+   worker thread writes that state, stop and drain it first, then clear (MFO:
+   `ResetAllState` calls `Diagnostics::StopPump()` before any clear). The load
+   callback may clear again as defence in depth.
+7. **Test the round-trip** in game: save, quit the exe, relaunch, load, and
+   compare the plugin log's load summary with what was saved. Then load the same
+   save once on the previous release's DLL to see the newer-record path log
+   instead of crashing.
+
 ## 7. Ops traps (test protocol)
 
 - **Stale DLL voids tests.** The MEO.log version header is the mandatory

@@ -56,3 +56,49 @@ Rendered rows regenerate per page-open, so they update on reload alone.
 Prove which pex a session runs by grepping the installed file:
 `grep -a 'NewString' installed/Foo.pex` — pex keeps its string table in plain
 text (this is also what makes the MCM-pex-editor stub feasible).
+
+## Procedure: compile, verify, ship (how MFO and MEO run it)
+
+**Prerequisites**
+- Proton Hotfix installed through Steam (its `files/bin/wine` carries Mono).
+- `PapyrusCompiler.exe` + `TESV_Papyrus_Flags.flg`. We use the copy bundled in
+  the Nemesis mod folder of an installed modlist. The Creation Kit's copy works
+  the same.
+- Script sources for everything you import: SKSE64 `Scripts/Source`, and po3's
+  Papyrus Extender / PapyrusUtil sources if used. Any installed modlist that
+  ships those mods has them under `mods/<mod>/.../Source`.
+- Each repo's `tools/compile.sh` hardcodes these paths at the top. Edit them for
+  a new machine.
+
+**Steps**
+```bash
+tools/compile.sh MFO_Trade       # one script, name without .psc
+tools/compile.sh all             # the repo's list
+```
+`all` is a fixed list per repo, not every `.psc`. MFO's is `MFO_Trade` only.
+Its MCM shims (`MFO_MCM`, `MFOP_MCM`) are empty `extends MCM_ConfigBase`
+scripts whose `.pex` is committed in `out/Scripts/` and never recompiled. MEO's
+is `MEO_StartupQuest MEO_PouchScript MEO_MCM`.
+
+**Import order is first match wins.** MFO puts `Source/Scripts`, then
+`Source/Stubs` (compile-only one-line stubs such as `Class.psc`,
+`GlobalVariable.psc`, `SKI_ConfigBase.psc` for types missing from the SKSE
+dump), then the SKSE sources, then po3 and PapyrusUtil, then the compiler's own
+`scripts/`. A stub only satisfies the compiler. It is never shipped.
+
+**Verify**
+1. stdout contains `1 succeeded, 0 failed` for each script (the script prints
+   `OK` or `FAIL` plus the error lines).
+2. The `.pex` exists in `out/Scripts/` with a fresh mtime.
+3. In game after a full restart: `grep -a '<a string you added>' <installed>.pex`
+   proves which build the game can load (see the hot-swap note above).
+
+The compiler accepts a Linux absolute path for `-o` (verified with
+`MFO_Trade.psc` into a scratch dir, `Batch compile of 1 files finished. 1
+succeeded, 0 failed.`).
+
+**Release behaviour.** MFO's `release.sh` recompiles when Proton's wine exists
+and otherwise ships the committed `.pex` with a WARN, but refuses to package
+without `out/Scripts/MFO_Trade.pex` (that script's VMAD would point at nothing).
+`MFO_Trade.pex` is gitignored because its embedded timestamp changes every
+compile.

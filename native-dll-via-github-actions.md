@@ -161,3 +161,137 @@ The prefix for a non-Steam shortcut is under
 `msvc-wine` can build locally without CI, but you own the toolchain setup and
 breakage. CI is the low-maintenance default; use msvc-wine only if you need
 offline iteration.
+
+---
+
+## Procedure: compile a DLL and prove the green run is yours
+
+**When:** any change under `native/`. There is no local MSVC on our Linux
+boxes. The Windows runner is the only compiler that ever sees the code.
+
+**Prerequisites:** `gh` authenticated (`gh auth status`), a push remote, the
+workflow file at `.github/workflows/native.yml`. MFO, APMF and MEO all use the
+workflow name `native` and upload one artifact named `<Mod>-dll` holding
+`<Mod>.dll` + `<Mod>.pdb`.
+
+**Steps**
+
+```bash
+git push -u origin <branch>                 # the push IS the build button
+SHA=$(git rev-parse HEAD)
+gh run list --workflow=native --commit "$SHA" \
+   --json databaseId,status,conclusion,headSha
+gh run watch <id> --exit-status             # blocks until done, non-zero on failure
+gh run view <id> --json headSha,status,conclusion,headBranch
+gh run download <id> -n MFO-dll -D /tmp/mfo-dll   # MFO.dll + MFO.pdb
+```
+
+**Verify success.** All three must hold. Anything else is not green.
+1. The run's `headSha` equals `git rev-parse HEAD` of the commit you mean to ship.
+2. `status` is `completed`.
+3. `conclusion` is `success`. `cancelled` means a newer push on the same ref
+   superseded it (the workflow sets `cancel-in-progress`), so look for the
+   newer run. `queued` / `in_progress` means keep waiting.
+
+`gh run view <id> --exit-status` returns 0 for a run that is still pending.
+Use `gh run watch` to wait, and read `conclusion` to decide.
+
+**The `paths:` filter.** The workflow only fires for `native/**` and the
+workflow file itself. A docs-only commit has no run at all. Two ways to handle
+a tip with no run:
+- Prove the tree is identical to a green commit, then use that run:
+  `git diff --quiet <green-sha> HEAD -- native/ && echo IDENTICAL`.
+  The release scripts compare `git rev-parse HEAD:native` against the run's
+  `native` tree for exactly this reason.
+- Or force a build of the tip: `gh workflow run native --ref <branch>` (the
+  workflow has `workflow_dispatch`). Then find the new run with
+  `gh run list --workflow=native --branch <branch> --limit 1`.
+
+**The PDB.** Always keep the `.pdb` from the SAME run as the DLL you deployed.
+It is the only way to turn a crash offset into a source line (see
+[deploy-and-logs.md](deploy-and-logs.md#symbolize-a-crash-frame)). A PDB from
+any other run gives wrong lines, silently. MFO and APMF add `/Zi` and
+`/DEBUG /OPT:REF /OPT:ICF` in `native/CMakeLists.txt` so a Release build writes
+the PDB. MEO's CMakeLists does not, so its artifact may carry no PDB (its
+release script copies one only "if CI produced one"). An early MFO build had
+the same gap and its first crash could not be symbolized.
+
+**Common failures**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `gh run list --commit` is empty | commit touched nothing under `native/` | tree-compare to a green commit, or `gh workflow run native --ref <branch>` |
+| green run, wrong code | you read the newest run on ANY branch | filter by `--commit "$SHA"` and check `headSha` |
+| run `cancelled` | a newer push on the same ref | wait for the newer run |
+| compile error | read it with `gh run view <id> --log-failed` | fix, push again |
+| `error C3688: invalid literal suffix 'sv'` in a file you never wrote | PCH lacks `using namespace std::literals;` | see the first-build gotcha above |
+| unresolved or unknown CommonLib symbol | the symbol does not exist in the pinned 3.7.0 | verify it (next section) before writing it |
+| cold build takes ~30 min | vcpkg cache miss (manifest hash changed) | expected once. Never stamp versions into `vcpkg.json` |
+
+Repo differences: MFO and APMF split the cache into `cache/restore` +
+`cache/save` and set a `concurrency` group. MEO still uses the combined
+`actions/cache@v4` with no `concurrency` group, and restricts `push` to
+`branches: ['**']` so a tag push does not build.
+
+---
+
+## Procedure: where CommonLibSSE-NG comes from, and verifying a symbol
+
+**How the build gets it.** `native/vcpkg.json` lists `commonlibsse-ng` with no
+version. `native/vcpkg-configuration.json` routes that one package to the
+colorglass git registry at a pinned `baseline`. The baseline decides the
+version. MFO, APMF and MEO all pin the same two baselines:
+
+| Registry | Baseline |
+|---|---|
+| default, `github.com/microsoft/vcpkg` | `d87340acc46bdeda386037b38aca30136e667e47` |
+| `gitlab.com/colorglass/vcpkg-colorglass` (package `commonlibsse-ng`) | `6309841a1ce770409708a67a9ba5c26c537d2937` |
+
+At that colorglass baseline the port is `version-semver 3.7.0` and fetches
+`CharmedBaryon/CommonLibSSE` at `REF c4ab853d095e81e3390b282d7ba01ab2f24ebf25`.
+Check it yourself:
+
+```bash
+B=6309841a1ce770409708a67a9ba5c26c537d2937
+curl -s "https://gitlab.com/colorglass/vcpkg-colorglass/-/raw/$B/ports/commonlibsse-ng/portfile.cmake" | grep -E 'REPO|REF'
+curl -s "https://gitlab.com/colorglass/vcpkg-colorglass/-/raw/$B/ports/commonlibsse-ng/vcpkg.json" | grep version
+```
+
+**Get a local copy of exactly that source** (once):
+
+```bash
+git clone https://github.com/CharmedBaryon/CommonLibSSE-NG pinned-3.7.0
+git -C pinned-3.7.0 checkout c4ab853d095e81e3390b282d7ba01ab2f24ebf25
+```
+
+On the dev box it already lives at
+`/mnt/gaming/modlists/Projects/_commonlib/pinned-3.7.0-c4ab853d/`. A second
+checkout there, `live-alandtse-ng/` (alandtse fork, v7.x), is reference only.
+It has bindings 3.7.0 lacks, so verifying against it produces code that fails
+CI.
+
+**Verify a symbol before you write it.**
+
+```bash
+P=/path/to/pinned-3.7.0
+grep -rn "GetGoldAmount" "$P/include" "$P/src"     # declared? defined?
+```
+
+- Not in the pinned tree means it does not exist for our build. Do not use it.
+- Present in the header is still not proof of the ABI. For any vfunc, offset
+  or struct layout, check the disassembly of the real binary. See
+  [hook-site-verification.md](hook-site-verification.md) and
+  [commonlibsse-ng-traps.md](commonlibsse-ng-traps.md) §6 (the hidden `sret`
+  slot).
+- Read the implementation in `src/`, not only the declaration. Several 3.7.0
+  helpers crash by design (commonlibsse-ng-traps.md lists them).
+
+**Changing a baseline** is a deliberate, reviewed change of its own. Never
+float it. Any edit to either vcpkg file changes the cache key and costs one
+cold build.
+
+**Forward note (in progress, not final).** An MIT-licensed fork of CommonLib
+3.7 served from our own vcpkg registry is being introduced (stage F0, on an
+MFO branch at the time of writing). Until it merges, `main`'s
+`native/vcpkg-configuration.json` is authoritative. Read that file, not this
+note, to learn what a given build compiled against.
