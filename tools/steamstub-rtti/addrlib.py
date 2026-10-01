@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Address Library decoder (formats 1 = SE version-*.bin, 2 = AE versionlib-*.bin).
 # Same varint scheme as CommonLibSSE-NG REL::IDDatabase::unpack_file; format only changes the file family.
-import struct, sys, bisect
+import struct, sys, bisect, os
 
 def load(path):
     d = open(path, 'rb').read(); off = 0
@@ -54,8 +54,8 @@ class DB:
         if i < 0: return None
         b = self.offs[i]; return self.rev[b], b
 
-AE = '/mnt/gaming/modlists/Projects/custom-modlist/vfs/Default/Data/SKSE/Plugins/versionlib-1-6-1170-0.bin'
-SE = '/mnt/gaming/modlists/Projects/custom-modlist/vfs/Default/Data/SKSE/Plugins/version-1-5-97-0.bin'
+AE = os.environ.get('ADDRLIB_AE', '/mnt/gaming/modlists/Projects/custom-modlist/vfs/Default/Data/SKSE/Plugins/versionlib-1-6-1170-0.bin')
+SE = os.environ.get('ADDRLIB_SE', '/mnt/gaming/modlists/Projects/custom-modlist/vfs/Default/Data/SKSE/Plugins/version-1-5-97-0.bin')
 
 if __name__ == '__main__':
     for p in (AE, SE):
