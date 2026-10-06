@@ -154,3 +154,44 @@ That contrast is exactly what this tool exists to establish.
   `resaver/ess/ChangeFormACHR.java` (read order), `ChangeFormExtraDataData.java`
   (the per-type table — treat lengths as *claims*, not facts),
   `RefID.java` (3-byte refid → FormID/plugin resolution), `VSVal.java`.
+
+## Plugin-side (ESP/ESM) record queries — `tools/esp_query.py`
+
+Saves only carry *changes*; the plugin stack carries the defaults. For
+"where does this state actually come from" questions you need both halves.
+`tools/esp_query.py` is a dependency-free python3 Bethesda-plugin reader
+(TES4 header, nested GRUPs, zlib-compressed records, XXXX large subrecords,
+master-list FormID resolution):
+
+    python3 esp_query.py masters   <plugin>              # master list + index bytes
+    python3 esp_query.py grouplist <plugin>              # top-level GRUP labels
+    python3 esp_query.py find      <plugin> ARMO 0001FD77
+    python3 esp_query.py byedid    <plugin> RACE KhajiitRace
+
+FormID-bearing subrecords print resolved as `plugin:localid`. Verified against
+vanilla `DraugrHelmet01`/`KhajiitRace`/`DA13AfflictedRace` (the one vanilla RACE
+with an RNAM armor-race — a good parser sanity target because RNAM is rare).
+
+Winning-override ("rule of one") questions: get the save's own plugin list
+(`ess.getPluginInfo().getFullPlugins()/getLitePlugins()` — see
+`DumpOutfitState.java` header for the recipe), resolve each name to a file via
+the MO2 profile's `modlist.txt` (top line = highest priority) + `Game Root/Data`,
+scan each plugin's relevant top-level GRUPs for records whose
+(master-resolved origin, localid) matches the target, and take the *last* hit in
+load order. A full 1656-plugin Tuxborn scan takes ~3 s. Worked example (Inigo
+invisible-helmet forensics, 2026-08): `override_scan.py` in the session
+scratchpad; findings in marth-follower-overhaul issue #62.
+
+## Outfit / race runtime-change check — `tools/DumpOutfitState.java`
+
+    java -cp ReSaver.jar DumpOutfitState.java save.ess <achr-refid> <npcbase-refid>
+
+Prints the save's plugin index for the top bytes, the ACHR change flags, and the
+base NPC_ ChangeForm flags decoded — `CHANGE_DEFAULT_OUTFIT` (bit 12) tells you
+whether a runtime `SetOutfit` was ever serialized; `CHANGE_NPC_RACE` (bit 25)
+whether the race changed. If neither is set, the actor's outfit/race are exactly
+the winning plugin records.
+
+Bonus: inventory `OutfitItem` extras (type 142) carry the *source outfit's*
+FormID — on looted gear this fingerprints which NPC's outfit the item
+originally spawned in (e.g. a draugr's).
