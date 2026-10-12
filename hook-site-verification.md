@@ -189,9 +189,11 @@ sections above explain the why. This is the order to do it in.
 Address Library file, `llvm-objdump` (or capstone), Python 3 with
 `cryptography` (for the unpacker). Tools live in
 [tools/steamstub-rtti/](tools/steamstub-rtti/). Run them from that directory.
-`addrlib.py` and `rtti.py` hardcode their input paths (the Address Library
-files and the exe), so edit
-those for your machine.
+`addrlib.py` and `rtti.py` default to the dev box's input paths; override them
+with environment variables: `ADDRLIB_AE` / `ADDRLIB_SE` (Address Library
+files), `RTTI_EXE` (the exe, or `RTTI_BINARIES_DIR` for a `<ver>/SkyrimSE.exe`
+layout) and `RTTI_EXTRA_PATH` (extra import dir, normally not needed because
+`img.py` sits beside `rtti.py`).
 
 1. **Pick the right Address Library file for the exe build.** AE ships two:
    `versionlib-1-6-1170-0.bin` (exe 1.6.1170.0) and
@@ -233,9 +235,9 @@ those for your machine.
    `rcx/rdx/r8/r9` it reads, and whether it writes through `rdx` and returns it
    in `rax` (a hidden `sret` out-slot that the CommonLib declaration may omit,
    see [commonlibsse-ng-traps.md](commonlibsse-ng-traps.md) §6). Only then
-   compare with the pinned CommonLib header. Known defect: `rtti.py` crashes
-   with `re.PatternError` for some classes (e.g. `Character`) because it feeds
-   raw rva bytes to `re.finditer` unescaped.
+   compare with the pinned CommonLib header. (Fixed: `rtti.py` used to crash
+   with `re.PatternError` for some classes, e.g. `Character`, because it fed
+   raw rva bytes to `re.finditer` unescaped; they are `re.escape`d now.)
 8. **Do it per runtime.** Every id and offset is verified separately on AE and
    SE. A layout valid on one is not assumed on the other.
 9. **Check the live game when you can.** `verify_hook_site_live.py` (MRO repo,

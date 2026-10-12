@@ -1,5 +1,6 @@
-import sys,struct,re
-sys.path.insert(0,'/tmp/claude-1000/-mnt-gaming-modlists-Projects-marth-follower-overhaul/a935cdde-4a9b-4a50-983f-339ce7b41062/scratchpad/unpack')
+import sys,struct,re,os
+# img.py / addrlib.py sit next to this script (already on sys.path). RTTI_EXTRA_PATH adds another dir; the old scratchpad dir stays as the default.
+sys.path.insert(0,os.environ.get('RTTI_EXTRA_PATH','/tmp/claude-1000/-mnt-gaming-modlists-Projects-marth-follower-overhaul/a935cdde-4a9b-4a50-983f-339ce7b41062/scratchpad/unpack'))
 from img import Img
 from addrlib import DB, AE, SE
 BASE=0x140000000
@@ -14,7 +15,7 @@ def vtables_for(img, pat):
         else: continue
         name=d[m.start():d.find(b'\0',m.start())].decode(errors='replace')
         # COLs: sig(4) offset(4) cdOffset(4) pTD(4 rva) pCHD(4) pSelf(4)
-        for cm in re.finditer(struct.pack('<I',tdrva), d):
+        for cm in re.finditer(re.escape(struct.pack('<I',tdrva)), d):
             coloff=cm.start()-12
             if coloff<0: continue
             sig,off,cd=struct.unpack_from('<III',d,coloff)
@@ -25,7 +26,7 @@ def vtables_for(img, pat):
             pself=struct.unpack_from('<I',d,coloff+20)[0]
             if pself!=colrva: continue
             # vtable = the 8-byte pointer to COL (absolute VA) + 8
-            for pm in re.finditer(struct.pack('<Q',BASE+colrva), d):
+            for pm in re.finditer(re.escape(struct.pack('<Q',BASE+colrva)), d):
                 po=pm.start()
                 for n,va,vs,ro,rs in img.secs:
                     if ro<=po<ro+rs: vt=va+(po-ro)+8; break
@@ -33,7 +34,9 @@ def vtables_for(img, pat):
                 out.append((name,off,vt))
     return out
 which=sys.argv[1]; pat=sys.argv[2].encode()
-img=Img('/mnt/gaming/modlists/Projects/marth-follower-overhaul/binaries/%s/SkyrimSE.exe'%('1.6.1170' if which=='ae' else '1.5.97'))
+# exe: RTTI_EXE env var wins; else <RTTI_BINARIES_DIR>/<ver>/SkyrimSE.exe (default: MFO's binaries/ dir)
+BIN=os.environ.get('RTTI_BINARIES_DIR','/mnt/gaming/modlists/Projects/marth-follower-overhaul/binaries')
+img=Img(os.environ.get('RTTI_EXE') or '%s/%s/SkyrimSE.exe'%(BIN,'1.6.1170' if which=='ae' else '1.5.97'))
 db=DB(AE if which=='ae' else SE)
 nslots=int(sys.argv[3]) if len(sys.argv)>3 else 6
 for name,off,vt in sorted(set(vtables_for(img,pat))):
