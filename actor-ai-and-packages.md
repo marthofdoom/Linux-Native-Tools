@@ -457,3 +457,45 @@ holes are either closed or explicitly accepted in writing. In the case above the
 inventory came out negative — combat movement leaves and the target/alarm
 bookkeeping had no deny — so forcing combat out of combat was correctly refused
 even though the cast facet worked.
+
+## 11. `Actor::StartCombat` with a combat group JOINS, and a join MERGES groups
+
+Read from the unpacked 1.6.1170 and 1.5.97 images on 2026-11-11 (the Harbinger anchor-leak fix, field defect Q92).
+Useful to anyone who puts an NPC into combat on purpose or keeps a private combat group.
+
+`Actor::StartCombat(this, target, group)` (AE id 38561 `0x6B6930`, SE 37608 `0x6251B0`; 1.7.104 `0x6C93B0` is
+instruction-identical to AE) has two shapes, picked by whether the actor ALREADY has a combat controller
+(`Actor+0x160` on AE, `+0x158` on SE).
+
+| Case | AE | What runs |
+|---|---|---|
+| No controller, a group given | `0x6B6CA5 test rbp,rbp` -> `0x6B6CB7 call 0x83D2C0` | the group JOIN. The controller it returns is stored at `Actor+0x160` |
+| No controller, no group, a target | `0x6B6CD0 call 0x83D180` | a new group for (actor, target) |
+| Has a controller, a target that is NOT its current one | `0x6B6D39..0x6B6D5F call 0x559150` | the controller's target is set. No join |
+| Has a controller, target null OR equal to its current one, a group given | `0x6B6D66 test rbp,rbp` -> `0x6B6D78 call 0x83D2C0` | the group JOIN again |
+
+The join (AE `0x83D2C0`, SE `0x7A5FA0`, 1.7.104 `0x8521A0`; `rcx` the combat manager, `rdx` the actor, `r8` the group):
+- actor without a controller: adds it as a member (`0x8040A0`) and builds a controller (`0x558070`);
+- actor WITH a controller whose group (`controller+0x00`) is another one: `0x83D325 call 0x804A80(newGroup, oldGroup)`,
+  then `0x8048D0(oldGroup)`.
+
+`0x804A80` (SE `0x76B160`) is a MERGE. It walks the old group's targets (array at `+0x08`, stride `0xA8`, count
+`+0x18`) and members (array at `+0x20`, stride `0x0C`, count `+0x30`) and moves them into the new group. It returns
+false, and merges nothing, when a target of one group fails `0x803F30` against the other.
+
+Call sites (byte scan of `.text` for `E8` / `E9` rel32): the merge has ONE (`0x83D325`; SE `0x7A6005`). The join has
+TWO, both inside StartCombat (AE `0x6B6CB7`, `0x6B6D78`; SE `0x62553B`, `0x6255FD`). Indirect calls were not scanned.
+
+What it means in practice:
+- The engine's own "an ally is fighting, join him" call (AE function `0x71C020`, call at `0x71C2DD`) passes a NULL
+  target and the ally's group. On an actor that is already in combat this MERGES that actor's whole group into the
+  ally's: every member and every TARGET.
+- So a target you put into one actor's group on purpose (a stand-in, a marker actor, a scripted foe) can show up in
+  an ally's group a moment later, and the ally will fight it. Harbinger's substrate anchor reached a teammate's real
+  fight this way.
+- If you must keep a group private, gate the merge at its one source: refuse the join for that actor. A hook at
+  StartCombat's own self check sees target (`rsi`) and group (`rbp`) before anything is done (they are copied at AE
+  `+0x23` / SE `+0x24`: `mov rbp,r8; mov rsi,rdx; mov rdi,rcx`). Compare the group by ADDRESS only: a CombatGroup has
+  no reference count and the call can come from any thread.
+- A cleanup that finds your target in someone's group cannot tell from the group alone who joined whom. Keep a
+  history (which controller you saw fighting clean before your target appeared) before you stop anyone's combat.
