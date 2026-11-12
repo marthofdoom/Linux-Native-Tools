@@ -161,6 +161,10 @@ precedent (RedyellowUnit/SmartTargetingNPC, 1.5.97 + 1.6.1170):
 - Do **not** hook `CombatTargetSelectorStandard` — NG has it only as a forward
   declaration (no vtable, no members). Papyrus has **no** combat-target setter at
   all, which is why no follower-command mod ships an "attack" verb in Papyrus.
+  (Update 2026-11-11: the selector and its scorer have since been read on all
+  three builds from the disassembly, with verified addresses and byte windows:
+  see [combat-target-selection.md](combat-target-selection.md). The warning
+  stands for anyone relying on the NG header alone.)
 
 ### Consent hooks vs insertion hooks
 `CombatMagicCaster::CheckStartCast` (vtable index **`0x06`**) is an *influence*
