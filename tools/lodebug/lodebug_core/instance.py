@@ -171,17 +171,27 @@ class Instance:
         self._plugins = res
         return res
 
+    def top_index(self):
+        """lower file name -> (layer label, path) for files directly in each layer root (first = winner)."""
+        if getattr(self, '_top', None) is None:
+            t = {}
+            for label, base in self.layers():
+                try: names = os.listdir(base)
+                except OSError: continue
+                for n in names:
+                    t.setdefault(n.lower(), (label, os.path.join(base, n)))
+            self._top = t
+        return self._top
+
     def resolve_plugins(self):
         """Fill path/owner/flags/masters. Disabled plugins are resolved too (info only)."""
         import mmap
         from . import plugins as P
-        layers = self.layers()
+        top = self.top_index()
         for pl in self.plugins():
-            for label, base in layers:
-                p = ci_child(base, pl.name)
-                if p and os.path.isfile(p):
-                    pl.path, pl.owner = p, label
-                    break
+            hit = top.get(pl.name.lower())
+            if hit and os.path.isfile(hit[1]):
+                pl.owner, pl.path = hit
             if pl.path:
                 try: pl.flags, pl.masters = P.read_tes4(pl.path)
                 except Exception: pass
