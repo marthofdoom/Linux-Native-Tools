@@ -10,7 +10,7 @@ and where a plugin can shape the choice without replacing it.
 
 ## 1. The question: is there a vanilla lever?
 
-No. marth asked for this check first. The standard selector's score (section 3) has these inputs and no others: a
+No. This was checked first. The standard selector's score (section 3) has these inputs and no others: a
 two second per-pair combat memory, the current target, a weapon-class comparison, distance, an attacker count whose
 global is zero, reach and combat-area tests, and two "candidate is down" tests. No actor value is read. No perk entry
 point is called. No keyword is tested. The one vanilla input that removes a candidate is DETECTION (admission needs
