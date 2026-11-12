@@ -12,8 +12,7 @@ def rec(t, fid, subs, flags=0, compress=False):
     body = b''.join(subs)
     if compress:
         flags |= 0x40000; body = struct.pack('<I', len(body)) + zlib.compress(body)
-    return t + struct.pack('<IIIII', len(body), flags, fid, 0, 0)[:20] + body[:0] + body if False else \
-        t + struct.pack('<IIIHHHH', len(body), flags, fid, 0, 0, 0, 0) + body
+    return t + struct.pack('<IIIHHHH', len(body), flags, fid, 0, 0, 0, 0) + body
 def grup(label, recs):
     body = b''.join(recs)
     return b'GRUP' + struct.pack('<I', 24 + len(body)) + label + struct.pack('<IHHHH', 0, 0, 0, 0, 0) + body

@@ -39,6 +39,7 @@ docs explain the *why* and the traps.
 | 10 | [resaver-headless-save-inspection.md](resaver-headless-save-inspection.md) | Read a `.ess` directly on Linux (ReSaver-as-library + own ACHR parse): dump any NPC's inventory / worn / phantom items headlessly. Tool: [tools/DumpNPCInventory.java](tools/DumpNPCInventory.java). |
 | 11 | [tools/idmap/README.md](tools/idmap/README.md) | Map Address Library ids between Skyrim builds straight from the binaries, so an id table for a new runtime can be built and cross-checked without the old build. |
 | 12 | [stealth-detection.md](stealth-detection.md) + [tools/disasm/README.md](tools/disasm/README.md) | How the engine decides an NPC is detected (CalculateDetection and its formula, the combat group's lost rules), plus a small annotated disassembler. (MFO / Harbinger) |
+| 13 | [tools/lodebug/README.md](tools/lodebug/README.md) | Read-only load-order debugger on Linux: active order, record winners, VFS (loose + BSA), and `pex-calls` to find which scripts raise crimes and from which event. |
 
 ## Basic procedures (index)
 
